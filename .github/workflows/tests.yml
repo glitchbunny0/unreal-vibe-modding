@@ -1,0 +1,30 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ["3.9", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Lua 5.4
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq lua5.4
+      - name: Bridge syntax
+        run: for f in uvmod/bridge/VibeBridge/Scripts/*.lua tests/*.lua; do luac5.4 -p "$f"; done
+      - name: Client and bridge, end to end
+        run: LUA=lua5.4 python -m unittest discover -s tests -v
+      - name: Installs, and refuses cleanly without settings
+        run: |
+          pip install .
+          uvmod help | grep -q 'uvmod mcp'
+          out="$(UVMOD_CONFIG=/nonexistent uvmod status 2>&1)" && exit 1
+          grep -q 'UVMOD_UE4SS is not set' <<<"$out"
+          test -f "$(python -c 'import uvmod, os; print(os.path.dirname(uvmod.__file__))')/bridge/VibeBridge/Scripts/main.lua"
