@@ -1,0 +1,62 @@
+---
+name: unreal-vibe-modding
+description: Use when modding a running Unreal Engine game through UE4SS with uvmod (CLI or MCP tools). Probe, change and verify the game in small steps without crashing it.
+---
+
+# Vibe modding an Unreal Engine game with uvmod
+
+The player runs the game; you reach it through `uvmod` (CLI) or the `unreal` MCP server's tools. Code you send runs as
+Lua on the game thread, inside a UE4SS Lua mod, with the full power of a mod. The player's session is at stake: a
+crash ends it, and so does a frozen game. Work in small steps, and verify each one before the next.
+
+## Start of a session
+
+1. `status`: is the game running, and which REPL answers? "UE4SS external REPL" can run code in any started mod (pick
+   one with `--mod` or `UVMOD_MOD`; `mods` lists them). "VibeBridge" runs code in its own state only.
+2. If nothing answers, tell the player what is missing: the game is not running, the external REPL is not turned on
+   (`ExternalLuaReplEnabled = 1` under `[Debug]`, then restart), or VibeBridge is not installed (`uvmod
+   install-bridge`, then restart).
+3. Check the hot reload line. If it says unsafe and you will hook Blueprint functions, ask the player to set
+   `EnableHotReloadSystem = 0`.
+
+## Rules that keep the game alive
+
+These are native crashes, not Lua errors, and `pcall` does not catch them:
+
+- **FName parameters.** A UFunction parameter of type `FName` needs `FName("Text")`. A Lua string or `nil` there
+  crashes UE4SS. Check the function's signature before the first call.
+- **Stale objects.** Check `obj:IsValid()` before using a UObject you got earlier: the game may have destroyed it.
+  `FindFirstOf` returns an invalid object, not `nil`, when nothing matches.
+- **Hot reload.** Once any mod hooks Blueprint functions, UE4SS's mod reload can hang or crash the game. Load new mod
+  builds with a game restart, or build the mod as a hot-swap shell and use `swap`.
+
+These freeze the game, or make it misbehave later:
+
+- **Endless loops.** Requests stop after their limit (250 ms by default, `--limit` up to 5000). One long native call
+  is not interrupted, and VibeBridge's limit is coarser, so keep loops bounded anyway.
+- **Hooks are permanent until the mod restarts.** Register a hook once, keep its ids in a global, and do not register
+  it again in every request. A hook callback that errors on every call floods the log.
+
+## How to find out what the game does
+
+- **A name is a guess.** A property called `IsHolding` can flip when an object is dropped, not when it is picked up.
+  Measure it: sample the value around the player's action, or hook the function and log when it fires, before you
+  build on it.
+- **Look at the game yourself.** Use `screenshot` instead of asking the player to describe the screen.
+- **Read the log after every change.** `log 50 'error|warning'` shows what your code caused.
+- **Prefer the game's own functions over writing properties.** Calling the function keeps the game's own logic,
+  replication and side effects. A direct property write can be local-only, or be overwritten next frame.
+
+## Building the mod
+
+- Keep the probe code and the mod apart. Probe with `lua`; write the mod as files, `push` it, and restart the game to
+  load it (or `swap` a hot-swap shell).
+- Change one thing at a time, and after each change verify it with a measurement, a log line or a screenshot.
+- When the player says something feels wrong, find the cause before adding a setting for it.
+- Before you finish, list what you verified in the game and what you did not.
+
+## What the answers look like
+
+`lua` returns printed lines, then one `=> value` per returned value and `OK`, or `ERROR:` with a traceback. Values are
+display strings: strings in quotes, `UObject: <full name>` or `(invalid)`, `FName: "..."`, tables as their entry
+count. Globals persist between requests; locals do not.
