@@ -12,8 +12,9 @@ from . import __version__, protocol
 from .config import KEYS, ConfigError, Settings
 from .game import Game, GameError, timeout_message
 from .transports import TransportError
+from .watch import LuaError, Watcher, render_events, render_wait, render_watches
 
-EXIT_OK, EXIT_LUA_ERROR, EXIT_USAGE, EXIT_NO_ANSWER = 0, 1, 2, 3
+EXIT_OK, EXIT_LUA_ERROR, EXIT_USAGE, EXIT_NO_ANSWER, EXIT_NOT_MET = 0, 1, 2, 3, 4
 
 HELP = f"""uvmod {__version__} — vibe modding for Unreal Engine games: run Lua live in a running game through UE4SS.
 
@@ -26,12 +27,24 @@ HELP = f"""uvmod {__version__} — vibe modding for Unreal Engine games: run Lua
   uvmod push DIR                            copy a mod folder into Mods/ (loads at the next game start)
   uvmod swap DIR                            push a hot-swap-shell mod and swap its logic in place
   uvmod shot [OUT.jpg]                      engine screenshot, copied here
+
+  uvmod watch FUNCTION [--capture EXPR]     record each call of a UFunction, in the game, until unwatched
+        e.g. uvmod watch /Script/Engine.PlayerController:ClientRestart
+        --capture 'self.Health, select(1, ...)': what to record (Lua over self and the parameters; nil skips
+        the call); default the object's name. --id NAME, --limit N (default 200),
+        --post: record after the call; native functions only (UE4SS runs no post callbacks for Blueprint
+        ones), and in a post capture `...` starts with the return value, if the function has one
+  uvmod events                              what was recorded since the last events/wait
+  uvmod wait [--for ID] [--count N]         block until N new calls were recorded (default 1, any watch) ...
+  uvmod wait --until 'LUA EXPR'             ... or until the expression is true; --timeout S (default 30)
+  uvmod watches | uvmod unwatch [ID]        list the watches / remove one (all without ID)
   uvmod install-bridge                      install the VibeBridge mod (for UE4SS builds without the external REPL)
   uvmod ps < script.ps1                     run PowerShell on the game box (ssh transport)
   uvmod mcp                                 MCP server on stdio, for AI agents
 
-  lua/run/mods take --mod NAME, --limit MS (1-5000) and --json (print the raw answer).
-  Exit codes: 0 OK, 1 the Lua raised an error, 2 usage or settings, 3 nothing answered.
+  lua/run/mods take --mod NAME, --limit MS (1-5000) and --json (print the raw answer); the watch commands
+  take --mod too (watches live in that mod's Lua state).
+  Exit codes: 0 OK, 1 the Lua raised an error, 2 usage or settings, 3 nothing answered, 4 wait timed out.
 
 Settings come from the environment or from the config file (KEY=value lines; the environment wins):
 """ + "\n".join(f"  {k:<16} {v}" for k, v in KEYS.items()) + """
@@ -100,6 +113,24 @@ def cmd_status(game: Game) -> int:
     return EXIT_NO_ANSWER
 
 
+def cmd_watch(watcher: Watcher, args) -> int:
+    if args.cmd == "watch":
+        batch = watcher.watch(args.function, args.id, args.capture, args.post, args.limit)
+        print(render_watches(batch))
+    elif args.cmd == "unwatch":
+        batch = watcher.unwatch(args.id)
+        print(f"watching: {', '.join(batch.active) or 'nothing'}")
+    elif args.cmd == "watches":
+        print(render_watches(watcher.list()))
+    elif args.cmd == "events":
+        print(render_events(watcher.events(args.since)))
+    else:
+        met, result, seconds = watcher.wait(args.for_id, args.count, args.until, args.timeout)
+        print(render_wait(met, result, seconds))
+        return EXIT_OK if met else EXIT_NOT_MET
+    return EXIT_OK
+
+
 def bridge_dir() -> str:
     return str(resources.files("uvmod") / "bridge" / "VibeBridge")
 
@@ -135,6 +166,24 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("shot")
     p.add_argument("out", nargs="?")
     p.add_argument("--mod")
+    p = sub.add_parser("watch")
+    p.add_argument("function")
+    p.add_argument("--id")
+    p.add_argument("--capture")
+    p.add_argument("--post", action="store_true")
+    p.add_argument("--limit", type=int, default=200)
+    p = sub.add_parser("unwatch")
+    p.add_argument("id", nargs="?")
+    p = sub.add_parser("events")
+    p.add_argument("--since", type=int)
+    p = sub.add_parser("wait")
+    p.add_argument("--for", dest="for_id")
+    p.add_argument("--count", type=int, default=1)
+    p.add_argument("--until")
+    p.add_argument("--timeout", type=float, default=30.0)
+    sub.add_parser("watches")
+    for name in ("watch", "unwatch", "events", "wait", "watches"):
+        sub.choices[name].add_argument("--mod")
     sub.add_parser("install-bridge")
     sub.add_parser("ps")
     sub.add_parser("mcp")
@@ -178,6 +227,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.cmd == "shot":
             print(game.screenshot(args.out, args.mod))
             return EXIT_OK
+        if args.cmd in ("watch", "unwatch", "events", "wait", "watches"):
+            return cmd_watch(Watcher(game, args.mod), args)
         if args.cmd == "install-bridge":
             print(game.push(bridge_dir()))
             game.transport.make_folder(protocol.FOLDER)
@@ -187,6 +238,9 @@ def main(argv: list[str] | None = None) -> int:
         if args.cmd == "ps":
             print(game.transport.powershell(sys.stdin.read()), end="")
             return EXIT_OK
+    except LuaError as e:
+        print(f"ERROR: {e}")
+        return EXIT_LUA_ERROR
     except (ConfigError, GameError, TransportError, ValueError, OSError) as e:
         print(f"uvmod: {e}", file=sys.stderr)
         return EXIT_USAGE if isinstance(e, (ConfigError, ValueError)) else EXIT_NO_ANSWER

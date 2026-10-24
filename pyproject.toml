@@ -24,4 +24,4 @@ Homepage = "https://github.com/glitchbunny0/unreal-vibe-modding"
 include = ["uvmod*"]
 
 [tool.setuptools.package-data]
-uvmod = ["bridge/VibeBridge/*", "bridge/VibeBridge/Scripts/*"]
+uvmod = ["bridge/VibeBridge/*", "bridge/VibeBridge/Scripts/*", "lua/*.lua"]

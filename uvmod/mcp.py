@@ -13,6 +13,7 @@ from . import __version__, protocol
 from .config import ConfigError, Settings
 from .game import Game, GameError, timeout_message
 from .transports import TransportError
+from .watch import LuaError, Watcher, render_events, render_wait, render_watches
 
 SUPPORTED_VERSIONS = ("2025-06-18", "2025-03-26", "2024-11-05")
 
@@ -26,7 +27,7 @@ Rules that crash the game when broken (a native crash, not a Lua error):
 - A UFunction parameter of type FName needs FName("Text"): a Lua string or nil there crashes UE4SS.
 - Never use a UObject after the game may have destroyed it; check obj:IsValid() first.
 - FindFirstOf/FindAllOf return invalid objects rather than nil; test IsValid().
-Also: a property's name is a guess about its meaning, so measure what it does before relying on it. Keep loops
+Also: a property's name is a guess about its meaning, so measure what it does before relying on it (`watch` helps). Keep loops
 bounded: the request stops after limit_ms (default 250, at most 5000), but a single long native call is not
 interrupted. RegisterHook callbacks run later on the game thread; register them once and remember what you added."""
 
@@ -62,6 +63,60 @@ TOOLS: list[dict[str, Any]] = [
         "name": "screenshot",
         "description": "Takes an engine screenshot of the game as the player sees it and returns the image. Look at the game yourself instead of asking the player to describe it.",
         "inputSchema": {"type": "object", "properties": {"mod": {"type": "string"}}},
+    },
+    {
+        "name": "watch",
+        "description": (
+            "Records each call of a UFunction (native or Blueprint) into a buffer inside the game, for `events` and "
+            "`wait`. Use it to learn what the game does when the player acts: watch, tell the player what to do, then "
+            "`wait` or `events`. Cheaper and more reliable than printing from hooks and reading the log. "
+            "`function` is the full path, e.g. /Script/Engine.PlayerController:ClientRestart or "
+            "/Game/Path/BP_Thing.BP_Thing_C:DoThing (a Blueprint class must be loaded first). `capture` is a Lua "
+            "expression over `self` and the function's parameters `...` (already read with :get()), e.g. "
+            "`self.Health, select(1, ...)`; its value is recorded, and nil skips the call. Without it, the object's "
+            "name is recorded. Records at most `limit` calls (default 200), then only counts them. The same id again "
+            "replaces the watch. The capture runs inside the game on every call with no time limit: keep it short."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "function": {"type": "string"},
+                "id": {"type": "string", "description": "Name for the watch; default the function's name."},
+                "capture": {"type": "string"},
+                "post": {"type": "boolean", "description": "Record after the call instead of before it. Native functions only: UE4SS runs no post callbacks for Blueprint functions. In a post capture, `...` starts with the return value (if the function has one), then the parameters."},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 100000},
+                "mod": {"type": "string", "description": "Mod whose Lua state holds the watch; use the same one for events and wait."},
+            },
+            "required": ["function"],
+        },
+    },
+    {
+        "name": "events",
+        "description": "What the watches recorded since the last `events` or `wait`. Identical consecutive calls are collapsed into one line.",
+        "inputSchema": {"type": "object", "properties": {"mod": {"type": "string"}}},
+    },
+    {
+        "name": "wait",
+        "description": (
+            "Blocks until `count` new calls of watch `for` were recorded (any watch if omitted), or, with `until`, "
+            "until that Lua expression is true; at most `timeout_s` seconds (default 30, max 120). Tell the player "
+            "what to do before calling it. Returns the events it saw, or the expression's value."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "for": {"type": "string"},
+                "count": {"type": "integer", "minimum": 1},
+                "until": {"type": "string"},
+                "timeout_s": {"type": "number", "minimum": 0, "maximum": 120},
+                "mod": {"type": "string"},
+            },
+        },
+    },
+    {
+        "name": "unwatch",
+        "description": "Removes a watch, or every watch without `id`. Watches also end when their mod restarts.",
+        "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}, "mod": {"type": "string"}}},
     },
     {
         "name": "push",
@@ -120,6 +175,21 @@ class Server:
                 data = base64.b64encode(f.read()).decode("ascii")
             mime = "image/png" if path.endswith(".png") else "image/jpeg"
             return {"content": [{"type": "image", "data": data, "mimeType": mime}, {"type": "text", "text": f"saved: {path}"}], "isError": False}
+        if name in ("watch", "events", "wait", "unwatch"):
+            watcher = Watcher(game, args.get("mod") or None)
+            if name == "watch":
+                batch = watcher.watch(str(args["function"]), args.get("id") or None, args.get("capture") or None,
+                                      bool(args.get("post")), int(args.get("limit") or 200))
+                return text(render_watches(batch) + f"\nwatching: {', '.join(batch.active)}")
+            if name == "events":
+                return text(render_events(watcher.events()))
+            if name == "unwatch":
+                batch = watcher.unwatch(args.get("id") or None)
+                return text(f"watching: {', '.join(batch.active) or 'nothing'}")
+            timeout = min(float(args.get("timeout_s", 30) or 0), 120.0)
+            met, result, seconds = watcher.wait(args.get("for") or None, int(args.get("count") or 1),
+                                                args.get("until") or None, timeout)
+            return text(render_wait(met, result, seconds))
         if name == "push":
             return text(game.push(str(args["dir"])))
         if name == "swap":
@@ -152,6 +222,8 @@ class Server:
                     return {"jsonrpc": "2.0", "id": msg_id, "error": {"code": -32602, "message": f"unknown tool: {name}"}}
                 try:
                     result = self.call(name, params.get("arguments") or {})
+                except LuaError as e:
+                    result = text(f"ERROR: {e}", True)
                 except (ConfigError, GameError, TransportError, ValueError, OSError, KeyError) as e:
                     result = text(f"{type(e).__name__}: {e}", True)
             else:
