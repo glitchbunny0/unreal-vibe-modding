@@ -27,6 +27,30 @@ def put_atomic(path: Path, data: bytes) -> None:
     os.replace(tmp, path)
 
 
+def put_if_absent(path: Path, data: bytes, tag: str) -> bool:
+    """Publish a file under `path` only if nothing is there: False if another writer got there first.
+    `tag` keeps concurrent writers' temporary files apart."""
+    tmp = path.with_name(f"{path.name}.{tag}.tmp")
+    tmp.write_bytes(data)
+    try:
+        if os.name == "nt":
+            os.rename(tmp, path)  # Windows: fails when the target exists
+            return True
+        try:
+            os.link(tmp, path)  # POSIX rename would replace the target; a hard link fails instead
+        except FileExistsError:
+            raise
+        except OSError:  # no hard links here (some network shares): check, then rename
+            if path.exists():
+                return False
+            os.replace(tmp, path)
+        return True
+    except FileExistsError:
+        return False
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
 def read_ini_line(ini: Path, key: str) -> str:
     try:
         text = ini.read_text(encoding="utf-8-sig", errors="replace")
@@ -63,12 +87,12 @@ class LocalTransport(Transport):
         age = self.bridge_age()
         if age is not None and age <= protocol.BRIDGE_FRESH_SECONDS:
             delivery, target = "bridge", self.folder / protocol.BRIDGE_SLOT
-            # One slot: wait until the previous request has been taken.
-            while target.exists() and time.monotonic() < deadline:
+            # One slot: wait until it is free, and publish only into a free slot, so concurrent callers
+            # take turns instead of replacing each other's requests.
+            while not put_if_absent(target, slot, request_id):
+                if time.monotonic() >= deadline:
+                    return Exchange(delivery, None)
                 time.sleep(POLL)
-            if target.exists():
-                return Exchange(delivery, None)
-            put_atomic(target, slot)
         else:
             delivery, target = "native", self.folder / f"{request_id}.request.json"
             put_atomic(target, native)

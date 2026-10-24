@@ -70,15 +70,19 @@ $fresh = (Test-Path $info) -and (((Get-Date) - (Get-Item $info).LastWriteTime).T
 $out = Join-Path $dir '{request_id}.response.json'
 $deadline = (Get-Date).AddSeconds({timeout})
 if ($fresh) {{
-  $delivery = 'bridge'; $target = Join-Path $dir '{protocol.BRIDGE_SLOT}'; $payload = '{base64.b64encode(slot).decode()}'
-  while ((Test-Path $target) -and (Get-Date) -lt $deadline) {{ Start-Sleep -Milliseconds 10 }}
-  if (Test-Path $target) {{ 'bridge'; 'TIMEOUT'; exit 0 }}
+  # One slot: [IO.File]::Move fails while a request is there, so concurrent callers take turns.
+  $delivery = 'bridge'; $target = Join-Path $dir '{protocol.BRIDGE_SLOT}'; $tmp = $target + '.{request_id}.tmp'
+  [IO.File]::WriteAllBytes($tmp, [Convert]::FromBase64String('{base64.b64encode(slot).decode()}'))
+  $placed = $false
+  while (-not $placed) {{
+    try {{ [IO.File]::Move($tmp, $target); $placed = $true }}
+    catch {{ if ((Get-Date) -ge $deadline) {{ Remove-Item $tmp -ErrorAction SilentlyContinue; 'bridge'; 'TIMEOUT'; exit 0 }}; Start-Sleep -Milliseconds 10 }}
+  }}
 }} else {{
-  $delivery = 'native'; $target = Join-Path $dir '{request_id}.request.json'; $payload = '{base64.b64encode(native).decode()}'
+  $delivery = 'native'; $target = Join-Path $dir '{request_id}.request.json'; $tmp = $target + '.tmp'
+  [IO.File]::WriteAllBytes($tmp, [Convert]::FromBase64String('{base64.b64encode(native).decode()}'))
+  Move-Item -Force $tmp $target
 }}
-$tmp = $target + '.tmp'
-[IO.File]::WriteAllBytes($tmp, [Convert]::FromBase64String($payload))
-Move-Item -Force $tmp $target
 $text = $null
 while ((Get-Date) -lt $deadline) {{
   if (Test-Path $out) {{ try {{ $text = [Convert]::ToBase64String([IO.File]::ReadAllBytes($out)); Remove-Item $out; break }} catch {{ }} }}

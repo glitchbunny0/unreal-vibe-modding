@@ -8,6 +8,7 @@ import os
 import shutil
 import subprocess
 import sys
+import threading
 import time
 import unittest
 from contextlib import redirect_stdout
@@ -21,8 +22,12 @@ from uvmod.game import Game  # noqa: E402
 LUA = os.environ.get("LUA") or shutil.which("lua5.4") or shutil.which("lua") or "lua"
 
 
-@unittest.skipUnless(os.path.exists(LUA) or shutil.which(LUA), "needs Lua 5.4 (set LUA=/path/to/lua)")
-class BridgeEndToEnd(unittest.TestCase):
+HAVE_LUA = bool(os.path.exists(LUA) or shutil.which(LUA))
+
+
+class BridgeHarness:
+    """A game folder with VibeBridge installed by `uvmod install-bridge`, run by tests/fake_ue4ss.lua."""
+
     def start(self, ini: bytes = b"[Debug]\r\nEnableHotReloadSystem = 0\r\n", folder: bool = True):
         self.dir = GameDir()
         (self.dir.ue4ss / "UE4SS-settings.ini").write_bytes(ini)
@@ -49,6 +54,9 @@ class BridgeEndToEnd(unittest.TestCase):
         for k in ("UVMOD_UE4SS", "UVMOD_TRANSPORT", "UVMOD_TIMEOUT", "UVMOD_CONFIG"):
             os.environ.pop(k, None)
 
+
+@unittest.skipUnless(HAVE_LUA, "needs Lua 5.4 (set LUA=/path/to/lua)")
+class BridgeEndToEnd(BridgeHarness, unittest.TestCase):
     def run_lua(self, code, limit=None):
         r = self.game.exec(code, None, limit)
         self.assertIsNotNone(r.answer, f"no answer to {code!r}")
@@ -107,6 +115,24 @@ class BridgeEndToEnd(unittest.TestCase):
             self.assertIn("limit of 250 ms", a["error"], code)
         self.assertIn("limit of 50 ms", self.run_lua("while true do end", 50)["error"])
         self.assertEqual(self.run_lua("1 + 1")["values"], ["2"])  # still answering afterwards
+
+    def test_concurrent_callers_share_the_slot(self):
+        self.start()
+        results, errors = {}, []
+
+        def caller(k):
+            for i in range(15):
+                r = self.game.exec(f"return '{k}-{i}'")
+                if not r.answer or r.answer["values"] != [f'"{k}-{i}"']:
+                    errors.append((k, i, r.answer))
+            results[k] = True
+
+        threads = [threading.Thread(target=caller, args=(k,)) for k in "abc"]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(60)
+        self.assertEqual((sorted(results), errors), (["a", "b", "c"], []))
 
     def test_idle_when_native_repl_is_on(self):
         self.start(ini=b"[Debug]\r\nExternalLuaReplEnabled = 1\r\n")
