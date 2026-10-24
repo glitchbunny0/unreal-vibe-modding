@@ -91,6 +91,11 @@ class Transport:
     def read_text(self, path: str) -> str:
         raise NotImplementedError
 
+    def press_keys(self, codes: list[int], hold_ms: int) -> str:
+        """Press virtual keys in the game's window (brought to the front first). Returns the foreground window class
+        while pressing ("UnrealWindow" for an Unreal game)."""
+        raise TransportError("OS key presses need Windows: the ssh transport, or uvmod running on the game's Windows PC")
+
     def powershell(self, script: str) -> str:
         raise TransportError("this needs the ssh transport (a Windows box reached over SSH)")
 

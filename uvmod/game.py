@@ -146,6 +146,20 @@ class Game:
                 return out
         return png
 
+    def console(self, command: str, mod: str | None = None) -> str:
+        """Run an engine console command as the local player (open a map, ...). Shipping builds compile many out."""
+        from .helpers import lua_string
+
+        if not command.strip():
+            raise GameError("a console command is needed")
+        lua = (f"local pc = FindFirstOf(\"PlayerController\") if not pc:IsValid() then error(\"no player controller\") end "
+               f"StaticFindObject(\"/Script/Engine.Default__KismetSystemLibrary\"):ExecuteConsoleCommand(pc, {lua_string(command)}, pc) "
+               f"return \"ok\"")
+        result = self.exec(lua, mod)
+        if not result.ok:
+            raise GameError(protocol.render_text(result.answer) if result.answer else timeout_message(result.delivery, self.settings.timeout))
+        return f"ran: {command}"
+
     def burst(self, count: int = 6, every_ms: int = 200, out: str | None = None, mod: str | None = None) -> str:
         """`count` engine screenshots `every_ms` apart, scheduled inside the game (so the timing is the game's, not the
         transport's), copied here and tiled into one contact sheet. Returns its path (or a folder of PNGs without

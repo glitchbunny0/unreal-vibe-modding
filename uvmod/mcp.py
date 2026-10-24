@@ -14,7 +14,7 @@ from . import __version__, protocol
 from .config import ConfigError, Settings
 from .game import Game, GameError, timeout_message
 from .census import Census
-from .inputs import Input
+from .inputs import Input, press_key
 from .reflection import Inspector, render
 from .transports import TransportError
 from .watch import LuaError, Watcher, render_events, render_wait, render_watches
@@ -146,12 +146,14 @@ TOOLS: list[dict[str, Any]] = [
             "builds load), `ready` waits for a REPL (up to `timeout_s`), `crash` reports why it died: the newest crash "
             "folder (error, call stack, the faulting module and offset from the minidump), the end of UE4SS.log, and the "
             "last requests sent from here (the one without an answer is the first suspect). After a crash, read `crash` "
-            "before restarting, and do not repeat the call that killed it."
+            "before restarting, and do not repeat the call that killed it. `console` runs an engine console command as the "
+            "player: `open /Game/Path/Map` loads a level, the quickest way back to a known test scene."
         ),
         "inputSchema": {
             "type": "object",
             "properties": {
-                "action": {"type": "string", "enum": ["launch", "stop", "restart", "ready", "crash"]},
+                "action": {"type": "string", "enum": ["launch", "stop", "restart", "ready", "crash", "console"]},
+                "command": {"type": "string", "description": "console: e.g. 'open /Game/Maps/Level' to load a test scene"},
                 "timeout_s": {"type": "number", "minimum": 10, "maximum": 600},
             },
             "required": ["action"],
@@ -193,14 +195,16 @@ TOOLS: list[dict[str, Any]] = [
             "injects `value` for `name` once, or on every frame for `hold_ms` (a held button, a stick held over, the mouse "
             "moved for a while: IA_Look with value [x, y]); `stop` releases everything held. The game's mapping contexts, "
             "triggers and modifiers run as for real input, so an action only does something where the game would react "
-            "to it. Verify the effect (watch the InpActEvt_<Action> functions, snapshot, screenshot). Say so before "
-            "moving the player's character while they play."
+            "to it. Verify the effect (watch the InpActEvt_<Action> functions, snapshot, screenshot). `key` presses a "
+            "keyboard key at the OS level in the game's window (brought to the front), for a mod's UE4SS keybinds, "
+            "which read the keyboard directly (Windows only; `hold_ms` default 150). Say so before moving the player's "
+            "character while they play."
         ),
         "inputSchema": {
             "type": "object",
             "properties": {
-                "action": {"type": "string", "enum": ["list", "press", "stop", "status"]},
-                "name": {"type": "string", "description": "press: an InputAction name (IA_Jump) or path; list: a filter"},
+                "action": {"type": "string", "enum": ["list", "press", "stop", "status", "key"]},
+                "name": {"type": "string", "description": "press: an InputAction name (IA_Jump) or path; list: a filter; key: a UE4SS Key name (F8, NUM_ONE, CONTROL+F8)"},
                 "value": {"type": "array", "items": {"type": "number"}, "minItems": 1, "maxItems": 3,
                           "description": "X (button: 1), X,Y (2D axis), X,Y,Z; default [1]"},
                 "hold_ms": {"type": "integer", "minimum": 0, "maximum": 60000},
@@ -419,6 +423,8 @@ class Server:
                 return text(game.stop())
             if action == "crash":
                 return text(game.crash_report())
+            if action == "console":
+                return text(game.console(str(args.get("command") or "")))
             if action in ("ready", "restart"):
                 lines = []
                 if action == "restart":
@@ -428,7 +434,7 @@ class Server:
                     time.sleep(10.0)
                 ok, answer = game.ready(timeout)
                 return text("\n".join(lines + [answer]), not ok)
-            raise ValueError("action is launch, stop, restart, ready or crash")
+            raise ValueError("action is launch, stop, restart, ready, crash or console")
         if name == "calls":
             census = Census(game, args.get("mod") or None)
             action = args.get("action")
@@ -460,7 +466,9 @@ class Server:
                 return text(inp.stop())
             if action == "status":
                 return text(inp.status())
-            raise ValueError("action is list, press, stop or status")
+            if action == "key":
+                return text(press_key(game, str(args.get("name") or ""), int(args.get("hold_ms") or 150)))
+            raise ValueError("action is list, press, stop, status or key")
         if name in ("inspect", "call", "snapshot"):
             return text(self._reflection(game, name, args))
         raise KeyError(name)

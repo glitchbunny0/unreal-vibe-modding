@@ -48,3 +48,15 @@ class Input:
 
     def status(self) -> str:
         return self._call("__uvmod_input.status()")
+
+
+def press_key(game: Game, combo: str, hold_ms: int = 150) -> str:
+    """An OS key press in the game's window, for UE4SS keybinds (see keys.py)."""
+    from . import keys
+
+    codes = keys.parse(combo)
+    front = game.transport.press_keys(codes, max(50, min(int(hold_ms), 10000)))
+    if front != "UnrealWindow":
+        return (f"pressed {combo}, but the window in front was '{front or '?'}', not the game's: UE4SS keybinds only "
+                "react while the game is in front")
+    return f"pressed {combo} in the game's window for {hold_ms} ms"

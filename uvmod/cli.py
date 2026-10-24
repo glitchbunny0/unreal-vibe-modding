@@ -13,7 +13,7 @@ from . import __version__, journal, protocol
 from .config import KEYS, ConfigError, Settings
 from .game import Game, GameError, timeout_message
 from .census import Census
-from .inputs import Input, parse_value
+from .inputs import Input, parse_value, press_key
 from .reflection import Inspector, parse_cli_args, render
 from .transports import TransportError
 from .watch import LuaError, Watcher, render_events, render_wait, render_watches
@@ -66,6 +66,8 @@ Playing it (Enhanced Input: the game's own mapping contexts, triggers and modifi
   uvmod input press ACTION [--value X[,Y[,Z]]] [--hold MS]   inject a value for an InputAction (IA_Jump, or a path):
         once, or on every frame for MS milliseconds (a held key, a stick held over, the mouse moved)
   uvmod input stop | uvmod input status     release everything held / what is held
+  uvmod input key KEY [--hold MS]           an OS key press in the game's window (brought to the front first), for a
+        mod's UE4SS keybinds: F8, NUM_ONE, CONTROL+F8 (UE4SS Key names). Windows only (local, or over ssh)
 
 Which functions run when something happens (the step before `watch`)
   uvmod calls discover REF ... [--idle S] [--act S] [--press ACTION [--value X,Y] [--hold MS]] [--native] [--pattern P]
@@ -95,6 +97,8 @@ The game itself
   uvmod launch | uvmod stop                 start the game (Steam, or UVMOD_LAUNCH) / end its process
   uvmod restart [--timeout S]               stop, launch, and wait until a REPL answers (load new mod builds)
   uvmod ready [--timeout S]                 wait until a REPL answers (default 180 s); exit 3 if it does not
+  uvmod console 'CMD'                       an engine console command as the player: 'open /Game/Maps/X' loads a level
+        (a known test scene). Shipping builds lack many commands (stat ...); cheats need the cheat manager
   uvmod crash                               why it died: crash folder, minidump stack, log tail, last requests sent
   uvmod journal [N]                         the last N requests uvmod sent and how each ended
   uvmod install-bridge                      install the VibeBridge mod (for UE4SS builds without the external REPL)
@@ -397,7 +401,7 @@ def main(argv: list[str] | None = None) -> int:
     for name in REFLECTION_COMMANDS:
         sub.choices[name].add_argument("--mod")
     p = sub.add_parser("input")
-    p.add_argument("action", choices=("list", "press", "stop", "status"))
+    p.add_argument("action", choices=("list", "press", "stop", "status", "key"))
     p.add_argument("what", nargs="?")
     p.add_argument("--value")
     p.add_argument("--hold", type=int, default=0)
@@ -438,6 +442,9 @@ def main(argv: list[str] | None = None) -> int:
     for name in ("ready", "restart"):
         sub.add_parser(name).add_argument("--timeout", type=float, default=180.0)
     sub.add_parser("crash")
+    p = sub.add_parser("console")
+    p.add_argument("command")
+    p.add_argument("--mod")
     sub.add_parser("journal").add_argument("count", nargs="?", type=int, default=10)
     sub.add_parser("install-bridge")
     sub.add_parser("ps")
@@ -501,6 +508,10 @@ def main(argv: list[str] | None = None) -> int:
                 if not args.what:
                     raise ValueError("input press needs an InputAction")
                 print(inp.press(args.what, parse_value(args.value), args.hold))
+            elif args.action == "key":
+                if not args.what:
+                    raise ValueError("input key needs a key name (F8, NUM_ONE, CONTROL+F8)")
+                print(press_key(game, args.what, args.hold or 150))
             elif args.action == "stop":
                 print(inp.stop())
             else:
@@ -544,6 +555,9 @@ def main(argv: list[str] | None = None) -> int:
             ok, text = game.ready(args.timeout)
             print(text)
             return EXIT_OK if ok else EXIT_NO_ANSWER
+        if args.cmd == "console":
+            print(game.console(args.command, args.mod))
+            return EXIT_OK
         if args.cmd == "crash":
             print(game.crash_report())
             return EXIT_OK

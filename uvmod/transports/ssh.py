@@ -275,6 +275,32 @@ if ($f) {{ $f.FullName.Replace('\\','/') + '|' + $f.LastWriteTime.Ticks }}
         path, stamp = out.rsplit("|", 1)
         return path, stamp
 
+    def press_keys(self, codes: list[int], hold_ms: int) -> str:
+        # Keys pressed from the SSH session reach no desktop: the presser runs as a scheduled task in the logged-in
+        # session, and writes back which window was in front.
+        from ..keys import script as key_script
+
+        body = key_script("__PROC__", codes, hold_ms, "__OUT__")
+        script = f"""
+$out = Join-Path $env:TEMP 'uvmod-key.out'
+$ps1 = Join-Path $env:TEMP 'uvmod-key.ps1'
+Remove-Item $out -ErrorAction SilentlyContinue
+$body = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('{base64.b64encode(body.encode("utf-8")).decode()}'))
+$body = $body.Replace('__PROC__', $proc).Replace('__OUT__', $out)
+Set-Content -Path $ps1 -Value $body -Encoding UTF8
+$a = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument ('-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "' + $ps1 + '"')
+$p = New-ScheduledTaskPrincipal -UserId "$env:COMPUTERNAME\\$env:USERNAME" -LogonType Interactive
+Register-ScheduledTask -TaskName 'uvmod-key' -Action $a -Principal $p -Force | Out-Null
+Start-ScheduledTask -TaskName 'uvmod-key'
+$sw = [Diagnostics.Stopwatch]::StartNew()
+while (-not (Test-Path $out) -and $sw.Elapsed.TotalSeconds -lt 20) {{ Start-Sleep -Milliseconds 100 }}
+if (Test-Path $out) {{ Get-Content $out }} else {{ 'ERROR: the key presser did not finish (is a user logged in?)' }}
+"""
+        out = self.powershell(script, timeout=90).strip()
+        if out.startswith("ERROR: "):
+            raise TransportError(out[len("ERROR: "):])
+        return out
+
     def recent_shots(self, count: int) -> list[str]:
         script = f"""
 $d = {psq(self.settings.shots)}

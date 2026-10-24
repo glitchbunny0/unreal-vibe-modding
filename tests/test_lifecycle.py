@@ -117,6 +117,41 @@ class Readers(unittest.TestCase):
         self.assertEqual(parse_crash_context("not xml").error, "")
 
 
+class Keys(unittest.TestCase):
+    def test_parse(self):
+        from uvmod import keys
+
+        self.assertEqual(keys.parse("F8"), [0x77])
+        self.assertEqual(keys.parse("control+f8"), [0x11, 0x77])
+        self.assertEqual(keys.parse("NUM_ONE"), [0x61])
+        self.assertEqual(keys.parse("Q"), [0x51])
+        with self.assertRaises(ValueError):
+            keys.parse("F25")
+        text = keys.script("Game-Win64-Shipping", [0x11, 0x77], 150, r"C:\t\out")
+        self.assertLess(text.index("keybd_event(17, 0, 0"), text.index("keybd_event(119, 0, 0"), "modifiers go down first")
+        self.assertLess(text.index("keybd_event(119, 0, 2"), text.index("keybd_event(17, 0, 2"), "and come up last")
+        self.assertIn("Start-Sleep -Milliseconds 150", text)
+
+    def test_press_key_reports_the_window_in_front(self):
+        from uvmod.inputs import press_key
+
+        class FakeTransport:
+            front = "UnrealWindow"
+
+            def press_keys(self, codes, hold_ms):
+                self.pressed = (codes, hold_ms)
+                return self.front
+
+        class FakeGame:
+            transport = FakeTransport()
+
+        g = FakeGame()
+        self.assertEqual(press_key(g, "F8"), "pressed F8 in the game's window for 150 ms")
+        self.assertEqual(g.transport.pressed, ([0x77], 150))
+        g.transport.front = "Chrome_WidgetWin_1"
+        self.assertIn("not the game's", press_key(g, "F8"))
+
+
 class Journal(unittest.TestCase):
     def setUp(self):
         self.dir = GameDir()

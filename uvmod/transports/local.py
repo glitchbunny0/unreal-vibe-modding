@@ -326,6 +326,19 @@ class LocalTransport(Transport):
         shots = sorted(d.glob("*.png"), key=lambda p: p.stat().st_mtime)
         return (str(shots[-1]), str(shots[-1].stat().st_mtime)) if shots else None
 
+    def press_keys(self, codes: list[int], hold_ms: int) -> str:
+        if os.name != "nt":
+            return super().press_keys(codes, hold_ms)
+        from ..keys import script
+
+        import tempfile as _tempfile
+
+        out = Path(_tempfile.gettempdir()) / "uvmod-key.out"
+        out.unlink(missing_ok=True)
+        subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command",
+                        script(self._process(), codes, hold_ms, str(out))], capture_output=True, timeout=60)
+        return out.read_text(encoding="utf-8", errors="replace").strip() if out.exists() else ""
+
     def recent_shots(self, count: int) -> list[str]:
         d = self._shots_dir()
         if not d or not d.is_dir():

@@ -126,7 +126,15 @@ uvmod input press IA_Jump                     # one frame
 uvmod input press IA_Jump --hold 300          # held for 300 ms
 uvmod input press IA_Look --value 1,0 --hold 500   # turn right for half a second
 uvmod input stop
+uvmod input key F8                            # an OS key press in the game's window: for a mod's UE4SS keybinds
 ```
+
+`input key` is for keys that UE4SS itself reads (a mod's `RegisterKeyBind`): UE4SS polls the keyboard state and only
+while the game window is in front, so the key presser brings the game window to the front first and runs in the
+logged-in user's session (a scheduled task over ssh). Windows only.
+
+To get back to a known test scene, load it: `uvmod console 'open /Game/Ride/Maps/RideMap'` took RV There Yet? from
+its main menu straight into a level with a pawn.
 
 It uses `InjectInputVectorForAction`, because `InjectInputForAction` takes an `FInputActionValue`, a struct with no
 reflected fields. Measured on RV There Yet? (UE 5.6, UE4SS b1a0bc22): `IA_Jump` fires the game's own input events,
