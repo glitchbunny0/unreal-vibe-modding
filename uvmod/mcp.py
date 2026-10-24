@@ -13,6 +13,7 @@ from typing import Any
 from . import __version__, protocol
 from .config import ConfigError, Settings
 from .game import Game, GameError, timeout_message
+from .inputs import Input
 from .reflection import Inspector, render
 from .transports import TransportError
 from .watch import LuaError, Watcher, render_events, render_wait, render_watches
@@ -171,6 +172,30 @@ TOOLS: list[dict[str, Any]] = [
                 "inherited": {"type": "boolean"},
                 "path": {"type": "string", "description": "check: a mod folder or .lua file on this machine"},
                 "limit": {"type": "integer", "minimum": 1, "maximum": 500},
+            },
+            "required": ["action"],
+        },
+    },
+    {
+        "name": "input",
+        "description": (
+            "Plays the game through its own Enhanced Input, so you can test controls yourself instead of asking the "
+            "player. `list` shows the loaded InputActions (IA_Jump, IA_Move, IA_Look, ...) and their value types; `press` "
+            "injects `value` for `name` once, or on every frame for `hold_ms` (a held button, a stick held over, the mouse "
+            "moved for a while: IA_Look with value [x, y]); `stop` releases everything held. The game's mapping contexts, "
+            "triggers and modifiers run as for real input, so an action only does something where the game would react "
+            "to it. Verify the effect (watch the InpActEvt_<Action> functions, snapshot, screenshot). Say so before "
+            "moving the player's character while they play."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "enum": ["list", "press", "stop", "status"]},
+                "name": {"type": "string", "description": "press: an InputAction name (IA_Jump) or path; list: a filter"},
+                "value": {"type": "array", "items": {"type": "number"}, "minItems": 1, "maxItems": 3,
+                          "description": "X (button: 1), X,Y (2D axis), X,Y,Z; default [1]"},
+                "hold_ms": {"type": "integer", "minimum": 0, "maximum": 60000},
+                "mod": {"type": "string"},
             },
             "required": ["action"],
         },
@@ -349,6 +374,20 @@ class Server:
                 ok, answer = game.ready(timeout)
                 return text("\n".join(lines + [answer]), not ok)
             raise ValueError("action is launch, stop, restart, ready or crash")
+        if name == "input":
+            inp = Input(game, args.get("mod") or None)
+            action = args.get("action")
+            if action == "list":
+                return text(inp.list(args.get("name") or None))
+            if action == "press":
+                value = [float(v) for v in (args.get("value") or [1.0])][:3]
+                value += [0.0] * (3 - len(value))
+                return text(inp.press(str(args.get("name") or ""), (value[0], value[1], value[2]), int(args.get("hold_ms") or 0)))
+            if action == "stop":
+                return text(inp.stop())
+            if action == "status":
+                return text(inp.status())
+            raise ValueError("action is list, press, stop or status")
         if name in ("inspect", "call", "snapshot"):
             return text(self._reflection(game, name, args))
         raise KeyError(name)

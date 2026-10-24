@@ -63,8 +63,9 @@ function FakeFunction(owner_path, name, params, flags, impl)
     -- Called as obj[name](obj, ...): like UE4SS, a first argument that is the bound object is dropped.
     mt.__call = function(self, ...)
         local args = table.pack(...)
-        local first = 1
+        local first, context = 1, self.bound
         if self.bound ~= nil and args[1] == self.bound then first = 2 end
+        if self.bound == nil then context, first = args[1], 2 end -- an unbound UFunction takes its context first
         local inputs = {}
         for _, p in ipairs(params) do
             local pname = p:GetFName():ToString()
@@ -86,7 +87,7 @@ function FakeFunction(owner_path, name, params, flags, impl)
             end
             values[i] = v
         end
-        return f.impl(self.bound, table.unpack(values, 1, #inputs))
+        return f.impl(context, table.unpack(values, 1, #inputs))
     end
     local fn = setmetatable({}, mt)
     registry[path] = fn
@@ -318,3 +319,23 @@ function DumpJMAP()
     f:close()
     print("[JMapGenerator] Dump complete: 2 objects\n")
 end
+
+-- Enhanced Input: two InputActions, the local player's subsystem, and the interface function it injects through.
+local InputAction = FakeClass("/Script/EnhancedInput.InputAction", Object, { P("ValueType", "ByteProperty") }, {})
+FakeInstance(InputAction, "/Game/Input/IA_Jump.IA_Jump", { ValueType = 0 })
+FakeInstance(InputAction, "/Game/Input/IA_Look.IA_Look", { ValueType = 2 })
+local Subsystem = FakeClass("/Script/EnhancedInput.EnhancedInputLocalPlayerSubsystem", Object, {}, {})
+FakeInstance(Subsystem, "/Engine/Transient.GameEngine_0:LocalPlayer_0.EnhancedInputLocalPlayerSubsystem_0", {})
+FakeInjected = {}
+FakeFunction("/Script/EnhancedInput.EnhancedInputSubsystemInterface", "InjectInputVectorForAction", {
+    P("Action", "ObjectProperty", { class = InputAction }), P("Value", "StructProperty", { struct = Vector }),
+    P("Modifiers", "ArrayProperty"), P("Triggers", "ArrayProperty"),
+}, 0x04020400, function(context, action, value)
+    assert(context:GetClass() == Subsystem, "injected through the wrong object")
+    FakeInjected[#FakeInjected + 1] = action:GetFName():ToString() .. " " .. value.X .. "," .. value.Y
+end)
+local Statics = FakeClass("/Script/Engine.GameplayStatics", Object, {}, {})
+FakeInstance(Statics, "/Script/Engine.Default__GameplayStatics", {}, { cdo = true })
+table.insert(class_data(Statics).functions, FakeFunction("/Script/Engine.GameplayStatics", "GetRealTimeSeconds",
+    { P("WorldContextObject", "ObjectProperty", { class = Object }), P("ReturnValue", "FloatProperty") }, 0x14022401,
+    function() return os.clock() end))

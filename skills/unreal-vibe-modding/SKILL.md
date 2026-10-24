@@ -57,6 +57,10 @@ These freeze the game, or make it misbehave later:
   function with a `capture` of the values you care about, then `wait` for it and read the events. `wait` with `until`
   does the same for a value.
 - **Look at the game yourself.** Use `screenshot` instead of asking the player to describe the screen.
+- **Play it yourself.** `input` presses or holds the game's own InputActions (IA_Jump, IA_Look with an X,Y value), so
+  you can trigger the action you are studying and test a mod's controls without the player. Check that it did
+  something (watch the `InpActEvt_<Action>_...` functions, snapshot, screenshot): an action only works where the
+  game's mapping contexts are active. Say so before you move the character of a player who is playing.
 - **Read the log after every change.** `log 50 'error|warning'` shows what your code caused.
 - **Prefer the game's own functions over writing properties.** Calling the function keeps the game's own logic,
   replication and side effects. A direct property write can be local-only, or be overwritten next frame.

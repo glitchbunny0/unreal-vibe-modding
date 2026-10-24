@@ -107,6 +107,25 @@ uvmod snap before pawn          # keeps the readable property values inside the 
 uvmod diff before               # what changed since; --update makes now the new baseline
 ```
 
+### Playing it
+
+So an agent can test controls itself, `input` plays the game through its own Enhanced Input: it injects a value for an
+InputAction through the local player's `EnhancedInputLocalPlayerSubsystem`, once or on every frame for a while. The
+game's mapping contexts, triggers and modifiers run as they do for a real key:
+
+```sh
+uvmod input list                              # loaded InputActions and their value types
+uvmod input press IA_Jump                     # one frame
+uvmod input press IA_Jump --hold 300          # held for 300 ms
+uvmod input press IA_Look --value 1,0 --hold 500   # turn right for half a second
+uvmod input stop
+```
+
+It uses `InjectInputVectorForAction`, because `InjectInputForAction` takes an `FInputActionValue`, a struct with no
+reflected fields. Measured on RV There Yet? (UE 5.6, UE4SS b1a0bc22): `IA_Jump` fires the game's own input events,
+and `IA_Look` held at 1,0 for 500 ms turns the camera by 120°. Games without Enhanced Input (most UE4 titles) are not
+covered; there, `call` the input event's function directly.
+
 ### The game's reflection, offline
 
 `uvmod index` asks the running game's UE4SS to dump its reflection (`DumpJMAP`, in UE4SS experimental build 1181 and
@@ -172,8 +191,8 @@ session, because a program started over SSH has no desktop.
 { "mcpServers": { "unreal": { "command": "uvmod", "args": ["mcp"] } } }
 ```
 
-Tools: `lua`, `mods`, `status`, `log`, `screenshot`, `inspect`, `call`, `snapshot`, `api`, `watch`, `events`, `wait`,
-`unwatch`, `push`, `swap`, `game`. Their descriptions carry the rules that crash games when broken, because that is what an agent reads.
+Tools: `lua`, `mods`, `status`, `log`, `screenshot`, `inspect`, `call`, `snapshot`, `api`, `input`, `watch`, `events`,
+`wait`, `unwatch`, `push`, `swap`, `game`. Their descriptions carry the rules that crash games when broken, because that is what an agent reads.
 
 ## Safety
 

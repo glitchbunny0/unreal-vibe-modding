@@ -7,6 +7,7 @@ from __future__ import annotations
 import io
 import subprocess
 import sys
+import time
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
@@ -14,6 +15,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from test_bridge_e2e import HAVE_LUA, LUA, BridgeHarness  # noqa: E402
 from uvmod import cli, helpers  # noqa: E402
+from uvmod.inputs import Input, parse_value  # noqa: E402
 from uvmod.mcp import Server  # noqa: E402
 from uvmod.reflection import Inspector, parse_cli_args, render  # noqa: E402
 from uvmod.watch import LuaError  # noqa: E402
@@ -209,6 +211,36 @@ class InspectEndToEnd(BridgeHarness, unittest.TestCase):
         self.assertIn("nothing changed", r["content"][0]["text"])
         r = tool("inspect", what="nope")
         self.assertTrue(r["isError"])
+
+
+
+@unittest.skipUnless(HAVE_LUA, "needs Lua 5.4 (set LUA=/path/to/lua)")
+class InputEndToEnd(BridgeHarness, unittest.TestCase):
+    def setUp(self):
+        self.start()
+        self.inp = Input(self.game)
+
+    def injected(self):
+        return [v.strip('"') for v in self.game.exec("return table.unpack(FakeInjected)").answer["values"]]
+
+    def test_list_press_hold(self):
+        self.assertEqual(self.inp.list().splitlines(), ["IA_Jump  (button)  /Game/Input/IA_Jump.IA_Jump",
+                                                        "IA_Look  (axis2d)  /Game/Input/IA_Look.IA_Look"])
+        self.assertIn("injected IA_Jump = (1, 0, 0) for one frame", self.inp.press("IA_Jump"))
+        self.assertEqual(self.injected(), ["IA_Jump 1.0,0.0"])
+        self.assertIn("holding IA_Look = (0.5, -1, 0) for 300 ms (every 10 ms)", self.inp.press("ia_look", parse_value("0.5,-1"), 300))
+        self.assertIn("IA_Look held", self.inp.status())
+        time.sleep(0.6)
+        looks = [v for v in self.injected() if v.startswith("IA_Look")]
+        self.assertGreater(len(looks), 5)
+        self.assertEqual(set(looks), {"IA_Look 0.5,-1.0"})
+        self.assertEqual(self.inp.status(), "nothing held")
+        self.inp.press("IA_Jump", hold_ms=5000)
+        self.assertEqual(self.inp.stop(), "released 1 held action")
+        with self.assertRaisesRegex(LuaError, "no loaded InputAction named IA_Fly"):
+            self.inp.press("IA_Fly")
+        with self.assertRaises(ValueError):
+            parse_value("1,2,3,4")
 
 
 if __name__ == "__main__":

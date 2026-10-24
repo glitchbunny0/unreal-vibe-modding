@@ -12,6 +12,7 @@ from importlib import resources
 from . import __version__, journal, protocol
 from .config import KEYS, ConfigError, Settings
 from .game import Game, GameError, timeout_message
+from .inputs import Input, parse_value
 from .reflection import Inspector, parse_cli_args, render
 from .transports import TransportError
 from .watch import LuaError, Watcher, render_events, render_wait, render_watches
@@ -56,6 +57,12 @@ Reading the game (references: /Full/Path, first:Class, cdo:/Script/Pkg.Class, cl
   uvmod diff LABEL [REF] [--update]         what changed since the snapshot (--update: make now the new baseline)
   uvmod snaps | uvmod forget [LABEL]        list the snapshots / drop one (all without LABEL)
   uvmod target [DISTANCE] [--from REF]      what the camera looks at (a line trace, default 5000 cm)
+
+Playing it (Enhanced Input: the game's own mapping contexts, triggers and modifiers run as for real input)
+  uvmod input list [PATTERN]                the loaded InputActions and their value types
+  uvmod input press ACTION [--value X[,Y[,Z]]] [--hold MS]   inject a value for an InputAction (IA_Jump, or a path):
+        once, or on every frame for MS milliseconds (a held key, a stick held over, the mouse moved)
+  uvmod input stop | uvmod input status     release everything held / what is held
 
 The game's reflection, offline (an index built from UE4SS's own dump; no game needed once it is built)
   uvmod index [--from FILE.jmap] [--native-only] [--keep]   dump the running game's reflection (DumpJMAP) and index it
@@ -343,6 +350,12 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--from", dest="from_ref")
     for name in REFLECTION_COMMANDS:
         sub.choices[name].add_argument("--mod")
+    p = sub.add_parser("input")
+    p.add_argument("action", choices=("list", "press", "stop", "status"))
+    p.add_argument("what", nargs="?")
+    p.add_argument("--value")
+    p.add_argument("--hold", type=int, default=0)
+    p.add_argument("--mod")
     p = sub.add_parser("index")
     p.add_argument("--from", dest="from_file")
     p.add_argument("--native-only", action="store_true")
@@ -409,6 +422,19 @@ def main(argv: list[str] | None = None) -> int:
             return cmd_watch(Watcher(game, args.mod), args)
         if args.cmd in REFLECTION_COMMANDS:
             return cmd_reflection(Inspector(game, args.mod), args)
+        if args.cmd == "input":
+            inp = Input(game, args.mod)
+            if args.action == "list":
+                print(inp.list(args.what))
+            elif args.action == "press":
+                if not args.what:
+                    raise ValueError("input press needs an InputAction")
+                print(inp.press(args.what, parse_value(args.value), args.hold))
+            elif args.action == "stop":
+                print(inp.stop())
+            else:
+                print(inp.status())
+            return EXIT_OK
         if args.cmd == "index":
             print(game.build_index(args.from_file, not args.native_only, args.keep))
             return EXIT_OK
