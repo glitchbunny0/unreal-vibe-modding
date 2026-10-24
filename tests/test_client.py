@@ -293,7 +293,7 @@ class McpTests(unittest.TestCase):
         self.rpc("notifications/initialized", msg_id=None)
         tools = {t["name"] for t in self.rpc("tools/list", msg_id=2)["result"]["tools"]}
         self.assertEqual(tools, {"lua", "mods", "status", "log", "screenshot", "watch", "events", "wait", "unwatch", "push", "swap",
-                                 "inspect", "call", "snapshot", "game", "api", "input"})
+                                 "inspect", "call", "snapshot", "game", "api", "input", "calls"})
         r = self.rpc("tools/call", {"name": "lua", "arguments": {"code": "1 + 1"}}, msg_id=3)["result"]
         self.assertFalse(r["isError"])
         self.assertTrue(r["content"][0]["text"].startswith("=> 2\nOK\n(UE4SS,"))

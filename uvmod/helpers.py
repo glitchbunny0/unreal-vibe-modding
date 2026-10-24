@@ -63,6 +63,7 @@ class Helper:
 WATCH = Helper("watch.lua", "__uvmod")
 INSPECT = Helper("inspect.lua", "__uvmod_inspect")
 INPUT = Helper("input.lua", "__uvmod_input")
+CENSUS = Helper("census.lua", "__uvmod_census")
 
 
 def lua_string(text: str) -> str:

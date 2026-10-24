@@ -15,10 +15,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from test_bridge_e2e import HAVE_LUA, LUA, BridgeHarness  # noqa: E402
 from uvmod import cli, helpers  # noqa: E402
+from uvmod.census import Census  # noqa: E402
 from uvmod.inputs import Input, parse_value  # noqa: E402
 from uvmod.mcp import Server  # noqa: E402
 from uvmod.reflection import Inspector, parse_cli_args, render  # noqa: E402
-from uvmod.watch import LuaError  # noqa: E402
+from uvmod.watch import LuaError, lua_string  # noqa: E402
 
 PLANK = "first:BP_Plank_C"
 
@@ -241,6 +242,52 @@ class InputEndToEnd(BridgeHarness, unittest.TestCase):
             self.inp.press("IA_Fly")
         with self.assertRaises(ValueError):
             parse_value("1,2,3,4")
+
+
+
+@unittest.skipUnless(HAVE_LUA, "needs Lua 5.4 (set LUA=/path/to/lua)")
+class CensusEndToEnd(BridgeHarness, unittest.TestCase):
+    GRAB = "/Game/Fake/BP_Plank.BP_Plank_C:Grab"
+
+    def setUp(self):
+        self.start()
+        self.c = Census(self.game)
+
+    def fire(self, n, path=GRAB):
+        self.game.exec(f"for i = 1, {n} do FakeFire({lua_string(path)}, 'BP_Plank_C_3') end")
+
+    def hooks(self):
+        return int(self.game.exec("return FakeHookCount()").answer["values"][0])
+
+    def test_windows_and_compare(self):
+        self.assertIn("counting calls of 2 functions", self.c.start([PLANK]))
+        self.assertEqual(self.hooks(), 2, "Blueprint functions only: Grab and Nudge, not Actor's")
+        self.c.mark()
+        self.fire(1, "/Game/Fake/BP_Plank.BP_Plank_C:Nudge")
+        idle = self.c.mark()
+        self.assertIn("1 calls of 1 functions", idle)
+        self.fire(4)
+        self.fire(1, "/Game/Fake/BP_Plank.BP_Plank_C:Nudge")
+        act = self.c.mark()
+        self.assertIn("5 calls of 2 functions", act)
+        self.assertIn("BP_Plank_C:Grab", act.splitlines()[1], "the busiest first")
+        diff = self.c.compare()
+        self.assertIn("new", diff)
+        self.assertIn("BP_Plank_C:Grab", diff)
+        self.assertNotIn(":Nudge", diff, "as busy as before: left out")
+        self.assertEqual(self.c.stop(), "removed 2 hooks")
+        self.assertEqual(self.hooks(), 0)
+        with self.assertRaisesRegex(LuaError, "no census running"):
+            self.c.mark()
+
+    def test_native_and_discover(self):
+        self.assertIn("counting calls of 6 functions", self.c.start([PLANK], native=True))
+        self.c.stop()
+        out = self.c.discover([PLANK], idle_s=0.2, act_s=0.3, prompt=lambda msg: self.fire(3))
+        self.assertIn("new", out)
+        self.assertIn("BP_Plank_C:Grab", out)
+        self.assertTrue(out.endswith("removed 2 hooks"))
+        self.assertEqual(self.hooks(), 0)
 
 
 if __name__ == "__main__":

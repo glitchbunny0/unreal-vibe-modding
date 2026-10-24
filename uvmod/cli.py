@@ -12,6 +12,7 @@ from importlib import resources
 from . import __version__, journal, protocol
 from .config import KEYS, ConfigError, Settings
 from .game import Game, GameError, timeout_message
+from .census import Census
 from .inputs import Input, parse_value
 from .reflection import Inspector, parse_cli_args, render
 from .transports import TransportError
@@ -63,6 +64,13 @@ Playing it (Enhanced Input: the game's own mapping contexts, triggers and modifi
   uvmod input press ACTION [--value X[,Y[,Z]]] [--hold MS]   inject a value for an InputAction (IA_Jump, or a path):
         once, or on every frame for MS milliseconds (a held key, a stick held over, the mouse moved)
   uvmod input stop | uvmod input status     release everything held / what is held
+
+Which functions run when something happens (the step before `watch`)
+  uvmod calls discover REF ... [--idle S] [--act S] [--press ACTION [--value X,Y] [--hold MS]] [--native] [--pattern P]
+        hook every Blueprint function of the objects' classes (--native: native ones too), count calls in an idle
+        window and in an action window (pressing ACTION at its start, or telling you to act), and list what the
+        action ran: functions new in it or at least 3x busier. The hooks are removed afterwards.
+  uvmod calls start REF ... | mark | compare [--factor F] | stop     the same, one step at a time
 
 The game's reflection, offline (an index built from UE4SS's own dump; no game needed once it is built)
   uvmod index [--from FILE.jmap] [--native-only] [--keep]   dump the running game's reflection (DumpJMAP) and index it
@@ -356,6 +364,19 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--value")
     p.add_argument("--hold", type=int, default=0)
     p.add_argument("--mod")
+    p = sub.add_parser("calls")
+    p.add_argument("action", choices=("discover", "start", "mark", "compare", "stop"))
+    p.add_argument("refs", nargs="*")
+    p.add_argument("--idle", type=float, default=3.0)
+    p.add_argument("--act", type=float, default=5.0)
+    p.add_argument("--press")
+    p.add_argument("--value")
+    p.add_argument("--hold", type=int, default=0)
+    p.add_argument("--native", action="store_true")
+    p.add_argument("--pattern")
+    p.add_argument("--factor", type=float, default=3.0)
+    p.add_argument("--limit", type=int, default=40)
+    p.add_argument("--mod")
     p = sub.add_parser("index")
     p.add_argument("--from", dest="from_file")
     p.add_argument("--native-only", action="store_true")
@@ -434,6 +455,21 @@ def main(argv: list[str] | None = None) -> int:
                 print(inp.stop())
             else:
                 print(inp.status())
+            return EXIT_OK
+        if args.cmd == "calls":
+            census = Census(game, args.mod)
+            if args.action == "discover":
+                print(census.discover(args.refs, args.idle, args.act, args.press, parse_value(args.value), args.hold,
+                                      args.native, args.pattern,
+                                      prompt=lambda msg: print(f">>> {msg}", flush=True)))
+            elif args.action == "start":
+                print(census.start(args.refs, args.native, args.pattern))
+            elif args.action == "mark":
+                print(census.mark(args.limit))
+            elif args.action == "compare":
+                print(census.compare(args.factor, args.limit))
+            else:
+                print(census.stop())
             return EXIT_OK
         if args.cmd == "index":
             print(game.build_index(args.from_file, not args.native_only, args.keep))

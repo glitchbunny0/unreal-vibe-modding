@@ -13,6 +13,7 @@ from typing import Any
 from . import __version__, protocol
 from .config import ConfigError, Settings
 from .game import Game, GameError, timeout_message
+from .census import Census
 from .inputs import Input
 from .reflection import Inspector, render
 from .transports import TransportError
@@ -201,6 +202,33 @@ TOOLS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "calls",
+        "description": (
+            "Finds out which functions run when something happens, before you know what to `watch`. `discover` hooks "
+            "every Blueprint function of the classes of `refs` (pawn, pc, first:BP_Door_C, ...; `native` adds native "
+            "functions), counts calls for `idle_s` seconds, then for `act_s` seconds during which `press` (an "
+            "InputAction) is injected, or the player acts (tell them first), and lists the functions that were new in "
+            "the action window or at least 3x busier; the hooks are removed afterwards. `start`/`mark`/`compare`/`stop` "
+            "do the same in steps (mark closes a window). Counting runs a little Lua per call inside the game."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "enum": ["discover", "start", "mark", "compare", "stop"]},
+                "refs": {"type": "array", "items": {"type": "string"}},
+                "idle_s": {"type": "number", "minimum": 0.5, "maximum": 60},
+                "act_s": {"type": "number", "minimum": 0.5, "maximum": 110},
+                "press": {"type": "string"},
+                "value": {"type": "array", "items": {"type": "number"}, "minItems": 1, "maxItems": 3},
+                "hold_ms": {"type": "integer", "minimum": 0, "maximum": 60000},
+                "native": {"type": "boolean"},
+                "pattern": {"type": "string"},
+                "mod": {"type": "string"},
+            },
+            "required": ["action"],
+        },
+    },
+    {
         "name": "inspect",
         "description": (
             "Reads the game's reflection without changing anything. Start an exploration here, before writing Lua. "
@@ -374,6 +402,24 @@ class Server:
                 ok, answer = game.ready(timeout)
                 return text("\n".join(lines + [answer]), not ok)
             raise ValueError("action is launch, stop, restart, ready or crash")
+        if name == "calls":
+            census = Census(game, args.get("mod") or None)
+            action = args.get("action")
+            refs = [str(r) for r in (args.get("refs") or [])]
+            if action == "discover":
+                value = [float(v) for v in (args.get("value") or [1.0])][:3] + [0.0, 0.0]
+                return text(census.discover(refs, float(args.get("idle_s") or 3), float(args.get("act_s") or 5),
+                                            args.get("press") or None, (value[0], value[1], value[2]),
+                                            int(args.get("hold_ms") or 0), bool(args.get("native")), args.get("pattern") or None))
+            if action == "start":
+                return text(census.start(refs, bool(args.get("native")), args.get("pattern") or None))
+            if action == "mark":
+                return text(census.mark())
+            if action == "compare":
+                return text(census.compare())
+            if action == "stop":
+                return text(census.stop())
+            raise ValueError("action is discover, start, mark, compare or stop")
         if name == "input":
             inp = Input(game, args.get("mod") or None)
             action = args.get("action")

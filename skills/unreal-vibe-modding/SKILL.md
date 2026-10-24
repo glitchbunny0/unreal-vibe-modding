@@ -52,6 +52,9 @@ These freeze the game, or make it misbehave later:
 
 - **Read before you write.** `inspect` lists classes, properties with their current values, and functions with their
   signatures; `target` tells you what the camera is looking at. It is cheaper and safer than writing probe Lua.
+- **Find the function before you watch it.** `calls` `discover` on the objects involved (pawn, pc, the thing the
+  player handles) with `press` set to the action's InputAction lists what the action ran; then `watch` those with a
+  capture.
 - **A name is a guess.** A property called `IsHolding` can flip when an object is dropped, not when it is picked up.
   Measure it before you build on it: `snapshot` the object, tell the player what to do, then `diff`; or `watch` the
   function with a `capture` of the values you care about, then `wait` for it and read the events. `wait` with `until`

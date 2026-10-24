@@ -145,6 +145,24 @@ uvmod check MyMod/                            # a mod's Lua against the index
 crashes natively on it, it is not a Lua error) and argument counts that no function of that name accepts. It exits 1
 on errors, so it fits in a test script.
 
+### Which functions run when something happens
+
+Before you can `watch` a function you have to know its name. `calls discover` finds it: it hooks every Blueprint
+function of the classes you name, counts calls in an idle window and in an action window, and lists what the action
+ran. With `--press` it plays the action itself:
+
+```sh
+uvmod calls discover pawn pc --press IA_Jump --hold 300
+#   new  0.0/s -> 6.8/s  BP_FirstPersonCharacter_C:InpActEvt_IA_Jump_K2Node_EnhancedInputActionEvent_18
+#   new  0.0/s -> 0.4/s  BP_FirstPersonCharacter_C:K2_OnMovementModeChanged
+#   new  0.0/s -> 0.2/s  BP_FirstPersonCharacter_C:CheckFallingDamage
+uvmod calls discover first:BP_Door_C --act 10   # without --press it says when to act, and waits
+```
+
+`--native` adds native functions (never CoreUObject's), `--pattern` limits the hooks by name. The hooks are removed at
+the end; `calls start`, `mark`, `compare` and `stop` do the same one step at a time. On RV There Yet? the character
+and controller have 582 Blueprint functions; hooking, counting and removing them all took 14 s.
+
 ### Watching what the game does
 
 To learn what happens when the player does something, watch the function, let the player act, then read what was
@@ -191,8 +209,8 @@ session, because a program started over SSH has no desktop.
 { "mcpServers": { "unreal": { "command": "uvmod", "args": ["mcp"] } } }
 ```
 
-Tools: `lua`, `mods`, `status`, `log`, `screenshot`, `inspect`, `call`, `snapshot`, `api`, `input`, `watch`, `events`,
-`wait`, `unwatch`, `push`, `swap`, `game`. Their descriptions carry the rules that crash games when broken, because that is what an agent reads.
+Tools: `lua`, `mods`, `status`, `log`, `screenshot`, `inspect`, `call`, `snapshot`, `api`, `input`, `calls`, `watch`,
+`events`, `wait`, `unwatch`, `push`, `swap`, `game`. Their descriptions carry the rules that crash games when broken, because that is what an agent reads.
 
 ## Safety
 
