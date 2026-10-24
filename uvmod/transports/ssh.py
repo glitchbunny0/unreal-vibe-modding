@@ -8,17 +8,27 @@ import io
 import json
 import subprocess
 import tarfile
+import threading
 from pathlib import Path
 from typing import Iterator
 
 from .. import protocol
 from . import Exchange, Status, Transport, TransportError
 
-# Decodes the script that follows on stdin and runs it; only this fixed bootstrap rides the command line,
-# which cmd.exe caps at 8191 characters.
+# Reads the script that follows on stdin as one base64 line, says GO, then decodes and runs it; only this fixed
+# bootstrap rides the command line, which cmd.exe caps at 8191 characters.
+# Now and then a session over Windows OpenSSH never gets its input (a few percent of calls with ~20 KB of input,
+# in our measurements). So the read has a time limit, after which PowerShell exits instead of staying forever, and
+# GO comes before anything runs: a client that sees no GO can kill the session and try again safely.
+GO = "UVMOD-GO"
+GO_TIMEOUT = 10.0
+ATTEMPTS = 3
 _BOOT = (
     '$ProgressPreference="SilentlyContinue"; [Console]::OutputEncoding=[Text.Encoding]::UTF8; '
-    "$s=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String([Console]::In.ReadToEnd())); "
+    "$r=(New-Object IO.StreamReader([Console]::OpenStandardInput())).ReadLineAsync(); "
+    "if (-not $r.Wait(20000)) { exit 75 }; "
+    f"[Console]::Out.WriteLine('{GO}'); [Console]::Out.Flush(); "
+    "$s=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($r.Result)); "
     "& ([ScriptBlock]::Create($s))"
 )
 _BOOT_ENCODED = base64.b64encode(_BOOT.encode("utf-16-le")).decode("ascii")
@@ -35,6 +45,7 @@ class SshTransport(Transport):
         if not settings.host:
             raise TransportError("UVMOD_HOST is not set (ssh transport)")
         self.ssh = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", settings.host]
+        self.retries = 0  # sessions started again because they never read their input
         self.u = psq(settings.ue4ss)
         self.prelude = f"""$u = {self.u}
 $proc = {psq(settings.process)}
@@ -48,16 +59,59 @@ function Get-Game {{ if ($proc) {{ Get-Process -Name $proc -ErrorAction Silently
     def _command(self) -> list[str]:
         return self.ssh + [f"powershell -NoProfile -NonInteractive -EncodedCommand {_BOOT_ENCODED}"]
 
+    def _start(self, payload: bytes) -> tuple[subprocess.Popen, threading.Thread, list[bytes]]:
+        """Start a session, hand it the script, and wait for GO; retry sessions that never read it.
+        Returns the process, the thread reading the rest of stdout, and that thread's output buffer."""
+        for attempt in range(1, ATTEMPTS + 1):
+            proc = subprocess.Popen(self._command(), stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            assert proc.stdin and proc.stdout and proc.stderr
+            first: list[bytes] = []
+            got_first = threading.Event()
+
+            def read_first(out=proc.stdout, first=first, got_first=got_first):
+                first.append(out.readline())
+                got_first.set()
+
+            threading.Thread(target=read_first, daemon=True).start()
+            try:
+                proc.stdin.write(payload)
+                proc.stdin.close()
+            except OSError:
+                pass
+            if got_first.wait(GO_TIMEOUT) and first[0].rstrip(b"\r\n") == GO.encode():
+                rest: list[bytes] = []
+                reader = threading.Thread(target=lambda: rest.append(proc.stdout.read()), daemon=True)
+                reader.start()
+                return proc, reader, rest
+            if not got_first.is_set() or proc.poll() in (None, 75):
+                self.retries += 1
+                proc.kill()
+                proc.wait()
+                continue
+            # The session ended without GO: ssh or PowerShell failed before the script could run.
+            proc.wait()
+            err = (proc.stderr.read() + first[0]).decode("utf-8", errors="replace").strip()
+            raise TransportError(f"ssh {self.settings.host} failed (exit {proc.returncode}): {err[:500]}")
+        raise TransportError(f"ssh {self.settings.host}: the game box's PowerShell did not read its input "
+                             f"({ATTEMPTS} sessions, {GO_TIMEOUT:g} s each); nothing was run")
+
     def powershell(self, script: str, timeout: float | None = None) -> str:
-        payload = base64.b64encode((self.prelude + script).encode("utf-8"))
-        try:
-            done = subprocess.run(self._command(), input=payload, capture_output=True, timeout=timeout)
-        except subprocess.TimeoutExpired:
-            raise TransportError(f"ssh {self.settings.host}: no answer within {timeout:.0f} s") from None
-        out = done.stdout.decode("utf-8", errors="replace").replace("\r", "")
-        if done.returncode == 255:
-            raise TransportError(f"ssh {self.settings.host} failed: {done.stderr.decode(errors='replace').strip()}")
-        return out
+        payload = base64.b64encode((self.prelude + script).encode("utf-8")) + b"\n"
+        proc, reader, rest = self._start(payload)
+        assert proc.stderr
+        errors: list[bytes] = []
+        err_reader = threading.Thread(target=lambda: errors.append(proc.stderr.read()), daemon=True)
+        err_reader.start()
+        reader.join(timeout)
+        if reader.is_alive():
+            proc.kill()
+            proc.wait()
+            raise TransportError(f"ssh {self.settings.host}: the script started but did not finish within {timeout:.0f} s")
+        proc.wait()
+        err_reader.join(5)
+        if proc.returncode == 255:
+            raise TransportError(f"ssh {self.settings.host} failed: {b''.join(errors).decode(errors='replace').strip()}")
+        return b"".join(rest).decode("utf-8", errors="replace").replace("\r", "")
 
     # --- requests ------------------------------------------------------------------------------------------------
 
@@ -141,11 +195,24 @@ $r | ConvertTo-Json -Compress
 
     def follow(self, pattern: str = "") -> Iterator[str]:
         script = f"Get-Content -Encoding UTF8 -Tail 0 -Wait (Join-Path $u 'UE4SS.log') | Where-Object {{ $_ -match {psq(pattern or '.')} }}"
-        payload = base64.b64encode((self.prelude + script).encode("utf-8"))
-        proc = subprocess.Popen(self._command(), stdin=subprocess.PIPE, stdout=subprocess.PIPE)
-        assert proc.stdin and proc.stdout
-        proc.stdin.write(payload)
-        proc.stdin.close()
+        payload = base64.b64encode((self.prelude + script).encode("utf-8")) + b"\n"
+        # The handshake as in powershell(), but streaming: lines are read here, not by the reader thread.
+        for attempt in range(1, ATTEMPTS + 1):
+            proc = subprocess.Popen(self._command(), stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+            assert proc.stdin and proc.stdout
+            proc.stdin.write(payload)
+            proc.stdin.close()
+            first: list[bytes] = []
+            reader = threading.Thread(target=lambda out=proc.stdout, first=first: first.append(out.readline()), daemon=True)
+            reader.start()
+            reader.join(GO_TIMEOUT)
+            if first and first[0].rstrip(b"\r\n") == GO.encode():
+                break
+            self.retries += 1
+            proc.kill()
+            proc.wait()
+        else:
+            raise TransportError(f"ssh {self.settings.host}: the game box's PowerShell did not read its input")
         try:
             for raw in proc.stdout:
                 yield raw.decode("utf-8", errors="replace").rstrip("\r\n")
