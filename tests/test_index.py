@@ -183,6 +183,31 @@ p:IsValid()
             os.environ.update(saved)
 
 
+class NotesTests(unittest.TestCase):
+    def test_add_and_read(self):
+        from uvmod import notes
+
+        with tempfile.TemporaryDirectory() as d:
+            saved = os.environ.get("XDG_DATA_HOME")
+            os.environ["XDG_DATA_HOME"] = d
+            try:
+                ue4ss = r"C:\Steam\steamapps\common\Ride\Ride\Binaries\Win64\ue4ss"
+                self.assertIn("no notes for Ride yet", notes.read(ue4ss))
+                self.assertIn("games/Ride/notes.md", notes.add(ue4ss, "IsHolding flips  on drop,\nnot on pickup"))
+                notes.add(ue4ss, "yaw clamp +/-2")
+                text = notes.read(ue4ss)
+                self.assertTrue(text.startswith("# Notes: Ride\n"))
+                self.assertIn(": IsHolding flips on drop, not on pickup\n", text)
+                self.assertIn(": yaw clamp +/-2\n", text)
+                with self.assertRaises(ValueError):
+                    notes.add(ue4ss, "  ")
+            finally:
+                if saved is None:
+                    os.environ.pop("XDG_DATA_HOME", None)
+                else:
+                    os.environ["XDG_DATA_HOME"] = saved
+
+
 class ScaffoldTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()

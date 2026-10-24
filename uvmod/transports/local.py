@@ -326,6 +326,12 @@ class LocalTransport(Transport):
         shots = sorted(d.glob("*.png"), key=lambda p: p.stat().st_mtime)
         return (str(shots[-1]), str(shots[-1].stat().st_mtime)) if shots else None
 
+    def recent_shots(self, count: int) -> list[str]:
+        d = self._shots_dir()
+        if not d or not d.is_dir():
+            return []
+        return [str(p) for p in sorted(d.glob("*.png"), key=lambda p: p.stat().st_mtime, reverse=True)[:count]]
+
     def make_folder(self, name: str) -> None:
         (self.root / name).mkdir(exist_ok=True)
 

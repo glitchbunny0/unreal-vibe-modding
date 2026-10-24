@@ -65,8 +65,14 @@ TOOLS: list[dict[str, Any]] = [
     },
     {
         "name": "screenshot",
-        "description": "Takes an engine screenshot of the game as the player sees it and returns the image. Look at the game yourself instead of asking the player to describe it.",
-        "inputSchema": {"type": "object", "properties": {"mod": {"type": "string"}}},
+        "description": ("Takes an engine screenshot of the game as the player sees it and returns the image. Look at the game "
+                        "yourself instead of asking the player to describe it. With `burst` (2-16), takes that many shots "
+                        "`every_ms` apart (default 750, timed inside the game) and returns them tiled into one numbered contact "
+                        "sheet: for motion and animation, which one frame cannot show. The engine writes one screenshot at a "
+                        "time (about 0.7 s each at 1440p) and drops requests meanwhile, so shorter steps return fewer frames."),
+        "inputSchema": {"type": "object", "properties": {"mod": {"type": "string"},
+                                                         "burst": {"type": "integer", "minimum": 2, "maximum": 16},
+                                                         "every_ms": {"type": "integer", "minimum": 50, "maximum": 5000}}},
     },
     {
         "name": "watch",
@@ -162,12 +168,14 @@ TOOLS: list[dict[str, Any]] = [
             "or a unique name; `subclasses`; `check` reads a mod's Lua files at `path` (on this machine) and reports a "
             "string or nil passed where a UFunction takes an FName (a native crash) and impossible argument counts. "
             "Prefer it over live inspection for finding names: it covers everything the game had loaded when it was "
-            "dumped, costs nothing, and cannot crash anything."
+            "dumped, costs nothing, and cannot crash anything. `notes` reads this game's notes (read them first in a "
+            "session); `note` appends `text`: write down what you measured (a name that lies, a clamp limit, a call "
+            "that crashes, how to reach a test scene) so the next session does not have to find it again."
         ),
         "inputSchema": {
             "type": "object",
             "properties": {
-                "action": {"type": "string", "enum": ["search", "class", "sig", "subclasses", "check", "info"]},
+                "action": {"type": "string", "enum": ["search", "class", "sig", "subclasses", "check", "info", "notes", "note"]},
                 "text": {"type": "string", "description": "search: part of a name; class/sig/subclasses: a name or path"},
                 "kind": {"type": "string", "enum": ["class", "struct", "enum", "function", "property"]},
                 "inherited": {"type": "boolean"},
@@ -320,6 +328,13 @@ class Server:
         return self.game
 
     def call(self, name: str, args: dict[str, Any]) -> dict[str, Any]:
+        if name == "api" and args.get("action") in ("notes", "note"):
+            from . import notes
+
+            settings = Settings.load()
+            if args.get("action") == "note":
+                return text(notes.add(settings.ue4ss, str(args.get("text") or "")))
+            return text(notes.read(settings.ue4ss))
         if name == "api":
             from .cli import api_answer, open_index
             from .lint import check_paths
@@ -361,11 +376,20 @@ class Server:
             lines = game.log(int(args.get("lines") or 40), str(args.get("pattern") or ""))
             return text("\n".join(lines) or "(no matching lines)")
         if name == "screenshot":
-            path = game.screenshot(mod=args.get("mod") or None)
+            if args.get("burst"):
+                path = game.burst(int(args["burst"]), int(args.get("every_ms") or 750), mod=args.get("mod") or None)
+                if os.path.isdir(path):
+                    return text(f"no ffmpeg here to tile them; the frames are in {path}")
+                got, asked = game.last_burst
+                note = f"{got} of {asked} frames, numbered in order"
+            else:
+                path = game.screenshot(mod=args.get("mod") or None)
+                note = ""
             with open(path, "rb") as f:
                 data = base64.b64encode(f.read()).decode("ascii")
             mime = "image/png" if path.endswith(".png") else "image/jpeg"
-            return {"content": [{"type": "image", "data": data, "mimeType": mime}, {"type": "text", "text": f"saved: {path}"}], "isError": False}
+            caption = f"saved: {path}" + (f" ({note})" if note else "")
+            return {"content": [{"type": "image", "data": data, "mimeType": mime}, {"type": "text", "text": caption}], "isError": False}
         if name in ("watch", "events", "wait", "unwatch"):
             watcher = Watcher(game, args.get("mod") or None)
             if name == "watch":

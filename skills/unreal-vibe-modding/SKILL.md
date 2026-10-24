@@ -19,7 +19,9 @@ crash ends it, and so does a frozen game. Work in small steps, and verify each o
 3. Check the hot reload line. If it says unsafe and you will hook Blueprint functions, ask the player to set
    `EnableHotReloadSystem = 0`.
 4. `inspect` `world` shows where the player is (map, controller, pawn); explore with `inspect` before writing Lua.
-5. If `api` `info` says there is no index for this game build, build one (`uvmod index`, about 20 s). Look names and
+5. Read this game's notes (`api` `notes`), and add to them (`api` `note`) whenever you measure something a later
+   session would otherwise have to find again.
+6. If `api` `info` says there is no index for this game build, build one (`uvmod index`, about 20 s). Look names and
    signatures up with `api` first: it covers everything the game had loaded and touches nothing.
 
 ## Rules that keep the game alive
@@ -59,7 +61,9 @@ These freeze the game, or make it misbehave later:
   Measure it before you build on it: `snapshot` the object, tell the player what to do, then `diff`; or `watch` the
   function with a `capture` of the values you care about, then `wait` for it and read the events. `wait` with `until`
   does the same for a value.
-- **Look at the game yourself.** Use `screenshot` instead of asking the player to describe the screen.
+- **Look at the game yourself.** Use `screenshot` instead of asking the player to describe the screen; for motion,
+  `burst` returns several frames on one sheet (the engine writes about one screenshot per 0.7 s at 1440p, so it
+  cannot show anything faster).
 - **Play it yourself.** `input` presses or holds the game's own InputActions (IA_Jump, IA_Look with an X,Y value), so
   you can trigger the action you are studying and test a mod's controls without the player. Check that it did
   something (watch the `InpActEvt_<Action>_...` functions, snapshot, screenshot): an action only works where the

@@ -30,7 +30,9 @@ HELP = f"""uvmod {__version__} — vibe modding for Unreal Engine games: run Lua
   uvmod follow [REGEX]                      stream the log until Ctrl+C
   uvmod push DIR                            copy a mod folder into Mods/ (loads at the next game start)
   uvmod swap DIR                            push a hot-swap-shell mod and swap its logic in place
-  uvmod shot [OUT.jpg]                      engine screenshot, copied here
+  uvmod shot [OUT.jpg] [--burst N [--every MS]]   engine screenshot, copied here; --burst: N shots MS apart (default
+        750), timed in the game and tiled into one numbered contact sheet, to judge motion. The engine writes one
+        screenshot at a time (about 0.7 s each at 1440p) and drops requests meanwhile, so shorter steps lose frames
 
   uvmod watch FUNCTION [--capture EXPR]     record each call of a UFunction, in the game, until unwatched
         e.g. uvmod watch /Script/Engine.PlayerController:ClientRestart
@@ -78,6 +80,8 @@ The game's reflection, offline (an index built from UE4SS's own dump; no game ne
   uvmod api class NAME|PATH [--inherited]   properties (with defaults) and functions of a class, struct or enum
   uvmod api sig [Class:]Function            parameters with in / out / ref roles (what `call` needs)
   uvmod api subclasses NAME                 every class derived from it
+  uvmod notes | uvmod notes add TEXT        this game's notes: what was learned (names that lie, limits, safe calls),
+        kept for the next session; read them at the start of one
   uvmod check PATH ...                      read a mod's Lua against the index: a string or nil where a UFunction
         takes an FName is a native crash (error, exit 1); argument counts no function accepts (warning)
 
@@ -333,6 +337,8 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("shot")
     p.add_argument("out", nargs="?")
     p.add_argument("--mod")
+    p.add_argument("--burst", type=int, default=0)
+    p.add_argument("--every", type=int, default=750)
     p = sub.add_parser("watch")
     p.add_argument("function")
     p.add_argument("--id")
@@ -420,6 +426,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--limit", type=int, default=40)
     p.add_argument("--inherited", action="store_true")
     sub.add_parser("check").add_argument("paths", nargs="+")
+    p = sub.add_parser("notes")
+    p.add_argument("action", nargs="?", default="show", choices=("show", "add"))
+    p.add_argument("text", nargs="*")
     p = sub.add_parser("new")
     p.add_argument("name")
     p.add_argument("--dir", default=".")
@@ -473,7 +482,12 @@ def main(argv: list[str] | None = None) -> int:
             print(text)
             return EXIT_OK if ok else EXIT_LUA_ERROR
         if args.cmd == "shot":
-            print(game.screenshot(args.out, args.mod))
+            if args.burst:
+                path = game.burst(args.burst, args.every, args.out, args.mod)
+                got, asked = game.last_burst
+                print(f"{path} ({got} of {asked} frames" + ("; the engine drops shots requested while it still writes one" if got < asked else "") + ")")
+            else:
+                print(game.screenshot(args.out, args.mod))
             return EXIT_OK
         if args.cmd in ("watch", "unwatch", "events", "wait", "watches"):
             return cmd_watch(Watcher(game, args.mod), args)
@@ -509,6 +523,11 @@ def main(argv: list[str] | None = None) -> int:
             return EXIT_OK
         if args.cmd == "index":
             print(game.build_index(args.from_file, not args.native_only, args.keep))
+            return EXIT_OK
+        if args.cmd == "notes":
+            from . import notes
+
+            print(notes.add(game.settings.ue4ss, " ".join(args.text)) if args.action == "add" else notes.read(game.settings.ue4ss))
             return EXIT_OK
         if args.cmd == "launch":
             print(game.launch())

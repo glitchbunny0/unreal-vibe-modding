@@ -146,6 +146,66 @@ class Game:
                 return out
         return png
 
+    def burst(self, count: int = 6, every_ms: int = 200, out: str | None = None, mod: str | None = None) -> str:
+        """`count` engine screenshots `every_ms` apart, scheduled inside the game (so the timing is the game's, not the
+        transport's), copied here and tiled into one contact sheet. Returns its path (or a folder of PNGs without
+        ffmpeg)."""
+        if not 2 <= count <= 16:
+            raise GameError("a burst is 2 to 16 screenshots")
+        before = set(self.transport.recent_shots(count + 4))
+        lua = f"""
+local pc = FindFirstOf("PlayerController")
+local ksl = StaticFindObject("/Script/Engine.Default__KismetSystemLibrary")
+local function shot() if pc:IsValid() then ksl:ExecuteConsoleCommand(pc, "shot", pc) end end
+shot()
+if type(ExecuteInGameThreadWithDelay) == "function" then
+  for i = 1, {count - 1} do ExecuteInGameThreadWithDelay(i * {every_ms}, shot) end
+else
+  local k = 1
+  LoopAsync({every_ms}, function() k = k + 1 ExecuteInGameThread(shot) return k >= {count} end)
+end
+return "ok"
+"""
+        result = self.exec(lua, mod)
+        if not result.ok:
+            raise GameError(protocol.render_text(result.answer) if result.answer else timeout_message(result.delivery, self.settings.timeout))
+        # The engine writes one screenshot at a time and drops requests meanwhile (RV There Yet?, 2560x1440: one
+        # PNG per ~0.73 s), so stop waiting once nothing new arrived for a while after the last scheduled shot.
+        t0 = time.monotonic()
+        expected_end = t0 + count * every_ms / 1000
+        deadline = expected_end + 15
+        new: list[str] = []
+        last_change = t0
+        while time.monotonic() < deadline:
+            time.sleep(0.5)
+            now_new = [p for p in self.transport.recent_shots(count + 4) if p not in before]
+            if len(now_new) != len(new):
+                new, last_change = now_new, time.monotonic()
+            if len(new) >= count or (new and time.monotonic() > expected_end and time.monotonic() - last_change > 2.5):
+                break
+        if not new:
+            raise GameError("no new screenshots appeared (set UVMOD_SHOTS if the game saves them elsewhere)")
+        time.sleep(0.5)  # the last PNG may still be writing
+        folder = tempfile.mkdtemp(prefix="uvmod-burst-")
+        for i, path in enumerate(sorted(new)[:count], 1):
+            self.transport.fetch(path, os.path.join(folder, f"frame_{i:02d}.png"))
+        got = min(len(new), count)
+        self.last_burst = (got, count)
+        out = out or os.path.join(tempfile.gettempdir(), time.strftime("uvmod-burst-%H%M%S.jpg"))
+        if shutil.which("ffmpeg"):
+            cols = 3 if got > 4 else 2
+            rows = (got + cols - 1) // cols
+            done = subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-framerate", "1", "-i", os.path.join(folder, "frame_%02d.png"),
+                                   "-vf", f"scale=640:-1,drawtext=text='%{{frame_num}}':start_number=1:x=8:y=8:fontsize=28:fontcolor=white:box=1:boxcolor=black@0.5,tile={cols}x{rows}",
+                                   "-frames:v", "1", out], capture_output=True)
+            if done.returncode != 0:  # drawtext needs a font; tile without the numbers
+                done = subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-framerate", "1", "-i", os.path.join(folder, "frame_%02d.png"),
+                                       "-vf", f"scale=640:-1,tile={cols}x{rows}", "-frames:v", "1", out], capture_output=True)
+            if done.returncode == 0:
+                shutil.rmtree(folder, ignore_errors=True)
+                return out
+        return folder
+
     # --- starting and stopping the game, and what to do when it died ---------------------------------------------
 
     def launch(self) -> str:

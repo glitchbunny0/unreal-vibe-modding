@@ -56,6 +56,10 @@ class Transport:
     def newest_shot(self) -> tuple[str, str] | None:
         raise NotImplementedError
 
+    def recent_shots(self, count: int) -> list[str]:
+        """The paths of the newest `count` screenshots, newest first."""
+        raise NotImplementedError
+
     def fetch(self, path: str, dest: str) -> None:
         raise NotImplementedError
 

@@ -275,6 +275,15 @@ if ($f) {{ $f.FullName.Replace('\\','/') + '|' + $f.LastWriteTime.Ticks }}
         path, stamp = out.rsplit("|", 1)
         return path, stamp
 
+    def recent_shots(self, count: int) -> list[str]:
+        script = f"""
+$d = {psq(self.settings.shots)}
+if (-not $d) {{ $d = Join-Path $env:LOCALAPPDATA (($proc -replace '-(Win64|WinGDK)-Shipping$', '') + '\\Saved\\Screenshots\\Windows') }}
+Get-ChildItem -File -Filter *.png $d -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending |
+  Select-Object -First {int(count)} | ForEach-Object {{ $_.FullName.Replace('\\','/') }}
+"""
+        return [l for l in self.powershell(script, timeout=60).splitlines() if l.strip()]
+
     def make_folder(self, name: str) -> None:
         self.powershell(f"New-Item -ItemType Directory -Force (Join-Path $u {psq(name)}) | Out-Null", timeout=60)
 
