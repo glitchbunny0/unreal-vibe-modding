@@ -7,20 +7,13 @@ from __future__ import annotations
 import re
 import time
 from dataclasses import dataclass, field
-from importlib import resources
 
+from . import helpers
 from .game import Game, GameError, timeout_message
+from .helpers import LuaError, lua_string  # noqa: F401  (part of this module's interface)
 
-HELPER = (resources.files("uvmod") / "lua" / "watch.lua").read_text(encoding="utf-8")
-HELPER_VERSION = int(re.search(r"local VERSION = (\d+)", HELPER).group(1))
-NEED_HELPER = "uvmod: send the helper"
 ID_PATTERN = re.compile(r"^[A-Za-z0-9_.-]{1,40}$")
 MAX_WAIT_SECONDS = 600.0
-
-
-class LuaError(Exception):
-    """The game answered, and the Lua raised an error."""
-
 
 @dataclass
 class Event:
@@ -52,19 +45,6 @@ class Batch:
     watches: list[Watch] = field(default_factory=list)
 
 
-def lua_string(text: str) -> str:
-    """A Lua string literal for any text: printable ASCII stays, every other byte becomes a decimal escape."""
-    out = []
-    for byte in text.encode("utf-8"):
-        if byte in (0x22, 0x5C):
-            out.append("\\" + chr(byte))
-        elif 0x20 <= byte < 0x7F:
-            out.append(chr(byte))
-        else:
-            out.append(f"\\{byte:03d}")
-    return '"' + "".join(out) + '"'
-
-
 def parse(lines: list[str]) -> Batch:
     batch = Batch()
     for line in lines:
@@ -89,22 +69,7 @@ class Watcher:
         self.mod = mod
 
     def _call(self, call: str, limit_ms: int = 2000) -> Batch:
-        # The helper (~11 KB) goes along only when this Lua state lacks it (first use, a mod restart, a new version).
-        check = (f'local U = rawget(_ENV, "__uvmod") if type(U) ~= "table" or U.version ~= {HELPER_VERSION} then '
-                 f'return "{NEED_HELPER}" end\nreturn ' + call)
-        result = self.game.exec(check, self.mod, limit_ms)
-        if result.answer and result.answer.get("ok") and result.answer.get("values") == [f'"{NEED_HELPER}"']:
-            result = self.game.exec(HELPER + "\nreturn " + call, self.mod, limit_ms)
-        if result.answer is None:
-            raise GameError(timeout_message(result.delivery, self.game.settings.timeout))
-        if not result.answer.get("ok"):
-            raise LuaError(str(result.answer.get("error", "")).split("\nstack traceback:")[0].strip())
-        lines: list[str] = []
-        for value in result.answer.get("values", []):
-            if len(value) >= 2 and value[0] == '"' and value[-1] == '"':
-                value = value[1:-1]
-            lines.extend(value.split("\n"))
-        return parse(lines)
+        return parse(helpers.call(self.game, self.mod, helpers.WATCH, call, limit_ms))
 
     def watch(self, function: str, watch_id: str | None = None, capture: str | None = None, post: bool = False,
               limit: int = 200) -> Batch:

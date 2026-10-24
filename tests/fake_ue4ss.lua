@@ -70,6 +70,7 @@ print = function(...)
     logf:flush()
 end
 package.path = U .. "/Mods/VibeBridge/Scripts/?.lua;" .. package.path
+assert(loadfile((arg[0]:match("^(.*)[/\\]") or ".") .. "/fake_reflection.lua"))()
 assert(loadfile(U .. "/Mods/VibeBridge/Scripts/main.lua"))()
 
 local t0 = os.clock()

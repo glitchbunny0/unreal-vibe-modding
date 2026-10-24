@@ -11,6 +11,7 @@ from importlib import resources
 from . import __version__, protocol
 from .config import KEYS, ConfigError, Settings
 from .game import Game, GameError, timeout_message
+from .reflection import Inspector, parse_cli_args, render
 from .transports import TransportError
 from .watch import LuaError, Watcher, render_events, render_wait, render_watches
 
@@ -38,6 +39,22 @@ HELP = f"""uvmod {__version__} — vibe modding for Unreal Engine games: run Lua
   uvmod wait [--for ID] [--count N]         block until N new calls were recorded (default 1, any watch) ...
   uvmod wait --until 'LUA EXPR'             ... or until the expression is true; --timeout S (default 30)
   uvmod watches | uvmod unwatch [ID]        list the watches / remove one (all without ID)
+
+Reading the game (references: /Full/Path, first:Class, cdo:/Script/Pkg.Class, class:/Script/Pkg.Class, pc, pawn, world)
+  uvmod world                               world, player controller, pawn and its location, game mode
+  uvmod find REF | all:Class [--limit N]    objects: one reference, or every live instance of a class
+  uvmod props REF [PATTERN] [--own]         properties with their types and values (--own: not inherited ones)
+  uvmod funcs REF [PATTERN] [--own]         functions with their signatures and flags
+  uvmod sig REF FUNCTION                    one function's parameters
+  uvmod classes [PATTERN] [--base REF] [--kind class|struct|enum]   loaded types
+  uvmod call REF FUNCTION [ARG ...]         call a UFunction behind a guard: refuses what would crash UE4SS (nil or a
+        number for an FName, a non-table for a struct, an invalid object). ARGs are JSON where they parse
+        ({{"X": 1}}, 2.5, true), else text; text becomes an FName, FText or object (a REF) where the parameter needs
+        one. --lua 'EXPR, ...' passes Lua expressions instead.
+  uvmod snap LABEL REF [PATTERN]            keep the object's property values under LABEL (in the game)
+  uvmod diff LABEL [REF] [--update]         what changed since the snapshot (--update: make now the new baseline)
+  uvmod snaps | uvmod forget [LABEL]        list the snapshots / drop one (all without LABEL)
+  uvmod target [DISTANCE] [--from REF]      what the camera looks at (a line trace, default 5000 cm)
   uvmod install-bridge                      install the VibeBridge mod (for UE4SS builds without the external REPL)
   uvmod ps < script.ps1                     run PowerShell on the game box (ssh transport)
   uvmod mcp                                 MCP server on stdio, for AI agents
@@ -135,6 +152,41 @@ def bridge_dir() -> str:
     return str(resources.files("uvmod") / "bridge" / "VibeBridge")
 
 
+REFLECTION_COMMANDS = ("world", "find", "props", "funcs", "sig", "classes", "call", "snap", "diff", "snaps", "forget", "target")
+
+
+def cmd_reflection(insp: Inspector, args) -> int:
+    c = args.cmd
+    if c == "world":
+        op, answer = "world", insp.world()
+    elif c == "find":
+        op, answer = "find", insp.find(args.spec, args.limit)
+    elif c == "props":
+        op, answer = "props", insp.props(args.ref, args.pattern, not args.own, args.limit)
+    elif c == "funcs":
+        op, answer = "functions", insp.functions(args.ref, args.pattern, not args.own, args.limit)
+    elif c == "sig":
+        op, answer = "signature", insp.signature(args.ref, args.function)
+    elif c == "classes":
+        op, answer = "classes", insp.classes(args.pattern, args.base, args.kind, args.limit)
+    elif c == "call":
+        if args.lua and args.args:
+            raise ValueError("pass ARGs or --lua, not both")
+        op, answer = "call", insp.call(args.ref, args.function, parse_cli_args(args.args), args.lua)
+    elif c == "snap":
+        op, answer = "snapshot", insp.snapshot(args.label, args.ref, args.pattern)
+    elif c == "diff":
+        op, answer = "diff", insp.diff(args.label, args.ref, args.update)
+    elif c == "snaps":
+        op, answer = "snapshots", insp.snapshots()
+    elif c == "forget":
+        op, answer = "forget", insp.forget(args.label)
+    else:
+        op, answer = "target", insp.target(args.distance, args.from_ref)
+    print(render(op, answer))
+    return EXIT_OK
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     if not argv or argv[0] in ("help", "-h", "--help"):
@@ -184,6 +236,45 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("watches")
     for name in ("watch", "unwatch", "events", "wait", "watches"):
         sub.choices[name].add_argument("--mod")
+    sub.add_parser("world")
+    p = sub.add_parser("find")
+    p.add_argument("spec")
+    p.add_argument("--limit", type=int, default=50)
+    for name in ("props", "funcs"):
+        p = sub.add_parser(name)
+        p.add_argument("ref")
+        p.add_argument("pattern", nargs="?")
+        p.add_argument("--own", action="store_true")
+        p.add_argument("--limit", type=int, default=400 if name == "props" else 300)
+    p = sub.add_parser("sig")
+    p.add_argument("ref")
+    p.add_argument("function")
+    p = sub.add_parser("classes")
+    p.add_argument("pattern", nargs="?")
+    p.add_argument("--base")
+    p.add_argument("--kind", default="class", choices=("class", "struct", "enum"))
+    p.add_argument("--limit", type=int, default=200)
+    p = sub.add_parser("call")
+    p.add_argument("ref")
+    p.add_argument("function")
+    p.add_argument("args", nargs="*")
+    p.add_argument("--lua")
+    p = sub.add_parser("snap")
+    p.add_argument("label")
+    p.add_argument("ref")
+    p.add_argument("pattern", nargs="?")
+    p = sub.add_parser("diff")
+    p.add_argument("label")
+    p.add_argument("ref", nargs="?")
+    p.add_argument("--update", action="store_true")
+    sub.add_parser("snaps")
+    p = sub.add_parser("forget")
+    p.add_argument("label", nargs="?")
+    p = sub.add_parser("target")
+    p.add_argument("distance", nargs="?", type=float, default=5000.0)
+    p.add_argument("--from", dest="from_ref")
+    for name in REFLECTION_COMMANDS:
+        sub.choices[name].add_argument("--mod")
     sub.add_parser("install-bridge")
     sub.add_parser("ps")
     sub.add_parser("mcp")
@@ -229,6 +320,8 @@ def main(argv: list[str] | None = None) -> int:
             return EXIT_OK
         if args.cmd in ("watch", "unwatch", "events", "wait", "watches"):
             return cmd_watch(Watcher(game, args.mod), args)
+        if args.cmd in REFLECTION_COMMANDS:
+            return cmd_reflection(Inspector(game, args.mod), args)
         if args.cmd == "install-bridge":
             print(game.push(bridge_dir()))
             game.transport.make_folder(protocol.FOLDER)

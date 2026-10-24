@@ -18,13 +18,15 @@ crash ends it, and so does a frozen game. Work in small steps, and verify each o
    install-bridge`, then restart).
 3. Check the hot reload line. If it says unsafe and you will hook Blueprint functions, ask the player to set
    `EnableHotReloadSystem = 0`.
+4. `inspect` `world` shows where the player is (map, controller, pawn); explore with `inspect` before writing Lua.
 
 ## Rules that keep the game alive
 
 These are native crashes, not Lua errors, and `pcall` does not catch them:
 
 - **FName parameters.** A UFunction parameter of type `FName` needs `FName("Text")`. A Lua string or `nil` there
-  crashes UE4SS. Check the function's signature before the first call.
+  crashes UE4SS. Call UFunctions with the `call` tool: it reads the signature and refuses these (and converts text
+  to an `FName` where one is needed). In raw `lua`, check the function's signature before the first call.
 - **Stale objects.** Check `obj:IsValid()` before using a UObject you got earlier: the game may have destroyed it.
   `FindFirstOf` returns an invalid object, not `nil`, when nothing matches.
 - **Hot reload.** Once any mod hooks Blueprint functions, UE4SS's mod reload can hang or crash the game. Load new mod
@@ -46,9 +48,12 @@ These freeze the game, or make it misbehave later:
 
 ## How to find out what the game does
 
+- **Read before you write.** `inspect` lists classes, properties with their current values, and functions with their
+  signatures; `target` tells you what the camera is looking at. It is cheaper and safer than writing probe Lua.
 - **A name is a guess.** A property called `IsHolding` can flip when an object is dropped, not when it is picked up.
-  Measure it before you build on it: `watch` the function with a `capture` of the values you care about, tell the
-  player what to do, then `wait` for it and read the events. `wait` with `until` does the same for a value.
+  Measure it before you build on it: `snapshot` the object, tell the player what to do, then `diff`; or `watch` the
+  function with a `capture` of the values you care about, then `wait` for it and read the events. `wait` with `until`
+  does the same for a value.
 - **Look at the game yourself.** Use `screenshot` instead of asking the player to describe the screen.
 - **Read the log after every change.** `log 50 'error|warning'` shows what your code caused.
 - **Prefer the game's own functions over writing properties.** Calling the function keeps the game's own logic,

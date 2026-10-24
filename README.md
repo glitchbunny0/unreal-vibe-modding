@@ -72,6 +72,41 @@ uvmod swap MyMod                   # hot-swap a mod built as a hot-swap shell, n
 `lua`, `run` and `mods` take `--mod NAME`, `--limit MS` and `--json`. Exit codes: 0 OK, 1 the Lua raised an error,
 2 usage or settings, 3 nothing answered, 4 `wait` timed out.
 
+### Reading the game, and calling into it safely
+
+These read the game's reflection, so an agent can explore before it writes any Lua:
+
+```sh
+uvmod world                                   # world, player controller, pawn and where it is, game mode
+uvmod find all:BP_Door_C                      # every live instance of a class
+uvmod props pawn health                       # properties with types and current values (filtered by name)
+uvmod funcs first:BP_Door_C open              # functions with signatures and flags
+uvmod sig first:BP_Door_C OpenDoor            # one function's parameters
+uvmod classes Door --base /Script/Engine.Actor  # loaded classes (or --kind struct|enum)
+uvmod target                                  # what the camera is looking at (a line trace)
+```
+
+An object reference is a full path (`/Game/Maps/Level.Level:PersistentLevel.BP_Door_C_2`), `first:ShortClassName`,
+`cdo:/Script/Pkg.Class` (the class default object), `class:/Script/Pkg.Class`, or `pc`, `pawn`, `world`.
+
+`call` runs a UFunction behind a guard. It reads the parameters first and refuses what would crash UE4SS natively
+rather than raise a Lua error: `nil` or a number for an `FName`, a non-table for a struct, an invalid object.
+Arguments are JSON where they parse and text otherwise; text becomes an `FName`, an `FText` or the object a reference
+names, wherever the parameter needs one:
+
+```sh
+uvmod call first:BP_Door_C OpenDoor pawn true
+uvmod call pawn K2_SetActorLocation '{"X": 0, "Y": 0, "Z": 500}' false '{}' true
+uvmod call pawn ActorHasTag --lua 'FName("Player")'
+```
+
+To find out what an action changes, snapshot an object, act, and diff:
+
+```sh
+uvmod snap before pawn          # keeps the readable property values inside the game
+uvmod diff before               # what changed since; --update makes now the new baseline
+```
+
 ### Watching what the game does
 
 To learn what happens when the player does something, watch the function, let the player act, then read what was
@@ -99,8 +134,8 @@ that. The capture runs inside the game on every call, without a time limit, so k
 { "mcpServers": { "unreal": { "command": "uvmod", "args": ["mcp"] } } }
 ```
 
-Tools: `lua`, `mods`, `status`, `log`, `screenshot`, `watch`, `events`, `wait`, `unwatch`, `push`, `swap`. Their descriptions carry the rules that crash games
-when broken, because that is what an agent reads.
+Tools: `lua`, `mods`, `status`, `log`, `screenshot`, `inspect`, `call`, `snapshot`, `watch`, `events`, `wait`, `unwatch`,
+`push`, `swap`. Their descriptions carry the rules that crash games when broken, because that is what an agent reads.
 
 ## Safety
 

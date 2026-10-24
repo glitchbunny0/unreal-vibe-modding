@@ -12,6 +12,7 @@ from typing import Any
 from . import __version__, protocol
 from .config import ConfigError, Settings
 from .game import Game, GameError, timeout_message
+from .reflection import Inspector, render
 from .transports import TransportError
 from .watch import LuaError, Watcher, render_events, render_wait, render_watches
 
@@ -128,6 +129,81 @@ TOOLS: list[dict[str, Any]] = [
         "description": "For a mod built as a hot-swap shell: pushes it and swaps its logic in the running game without a restart. Fails if the running mod is not a shell yet.",
         "inputSchema": {"type": "object", "properties": {"dir": {"type": "string"}}, "required": ["dir"]},
     },
+    {
+        "name": "inspect",
+        "description": (
+            "Reads the game's reflection without changing anything. Start an exploration here, before writing Lua. "
+            "`what`: world (world, player controller, pawn, game mode), find (`ref`, or all:ShortClassName for every live "
+            "instance), props (properties of `ref` with types and current values), functions (functions of `ref` with "
+            "signatures and flags), signature (`name` on `ref`), classes (loaded classes/structs/enums whose name contains "
+            "`pattern`, optionally subclasses of `base`), target (what the camera looks at, a line trace over `distance` cm). "
+            "References: /Full/Object.Path, first:ShortClassName, cdo:/Script/Pkg.Class, class:/Script/Pkg.Class, pc, pawn, "
+            "world. `pattern` filters by a case-insensitive substring of the name. A property's name is a guess about its "
+            "meaning: measure it (snapshot, watch) before relying on it."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "what": {"type": "string", "enum": ["world", "find", "props", "functions", "signature", "classes", "target"]},
+                "ref": {"type": "string"},
+                "name": {"type": "string", "description": "signature: the function's name"},
+                "pattern": {"type": "string"},
+                "own": {"type": "boolean", "description": "props/functions: only those declared on the object's own class"},
+                "base": {"type": "string", "description": "classes: only subclasses of this class (path or reference)"},
+                "kind": {"type": "string", "enum": ["class", "struct", "enum"]},
+                "distance": {"type": "number"},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 2000},
+                "mod": {"type": "string"},
+            },
+            "required": ["what"],
+        },
+    },
+    {
+        "name": "call",
+        "description": (
+            "Calls a UFunction on an object behind a guard, and returns its return value. The guard reads the function's "
+            "parameters first and REFUSES what would crash UE4SS natively instead of raising a Lua error: nil or a number for "
+            "an FName parameter, a non-table for a struct, an invalid object. `args` is a JSON array, one per parameter (no "
+            "return value): text becomes an FName, an FText, or the object a reference names (first:Class, /Path, pawn) "
+            "where the parameter needs one; objects become tables ({\"X\": 1, \"Y\": 0, \"Z\": 0} for a vector); pass {} for "
+            "an out parameter and read it in the answer. `lua_args` passes Lua expressions instead (e.g. "
+            "'FName(\"Hand\"), {X = 1}'). Use inspect signature first. A call changes the game: calling the game's own "
+            "function keeps its logic and replication, unlike writing a property."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "ref": {"type": "string"},
+                "function": {"type": "string"},
+                "args": {"type": "array"},
+                "lua_args": {"type": "string"},
+                "limit_ms": {"type": "integer", "minimum": 1, "maximum": 5000},
+                "mod": {"type": "string"},
+            },
+            "required": ["ref", "function"],
+        },
+    },
+    {
+        "name": "snapshot",
+        "description": (
+            "Finds out what an action changes: `take` keeps the readable property values of `ref` under `label` inside "
+            "the game; tell the player what to do (or call a function); `diff` lists what changed since (with `update`, "
+            "now becomes the new baseline). `list` shows the snapshots, `forget` drops one (all without label). "
+            "`pattern` limits the properties taken."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "enum": ["take", "diff", "list", "forget"]},
+                "label": {"type": "string"},
+                "ref": {"type": "string"},
+                "pattern": {"type": "string"},
+                "update": {"type": "boolean"},
+                "mod": {"type": "string"},
+            },
+            "required": ["action"],
+        },
+    },
 ]
 
 
@@ -195,7 +271,50 @@ class Server:
         if name == "swap":
             ok, answer = game.swap(str(args["dir"]))
             return text(answer, not ok)
+        if name in ("inspect", "call", "snapshot"):
+            return text(self._reflection(game, name, args))
         raise KeyError(name)
+
+    @staticmethod
+    def _reflection(game: Game, name: str, args: dict[str, Any]) -> str:
+        insp = Inspector(game, args.get("mod") or None)
+        limit = args.get("limit")
+        if name == "call":
+            call_args = args.get("args")
+            if call_args is not None and not isinstance(call_args, list):
+                raise ValueError("args must be a JSON array")
+            kwargs = {"limit_ms": int(args["limit_ms"])} if args.get("limit_ms") else {}
+            return render("call", insp.call(str(args["ref"]), str(args["function"]), call_args, args.get("lua_args") or None, **kwargs))
+        if name == "snapshot":
+            action = args.get("action")
+            if action == "take":
+                return render("snapshot", insp.snapshot(str(args["label"]), str(args["ref"]), args.get("pattern") or None))
+            if action == "diff":
+                return render("diff", insp.diff(str(args["label"]), args.get("ref") or None, bool(args.get("update"))))
+            if action == "list":
+                return render("snapshots", insp.snapshots())
+            if action == "forget":
+                return render("forget", insp.forget(args.get("label") or None))
+            raise ValueError("action is take, diff, list or forget")
+        what = args.get("what")
+        ref = str(args.get("ref") or "")
+        pattern = args.get("pattern") or None
+        inherited = not args.get("own")
+        if what == "world":
+            return render("world", insp.world())
+        if what == "find":
+            return render("find", insp.find(ref, int(limit or 50)))
+        if what == "props":
+            return render("props", insp.props(ref, pattern, inherited, int(limit or 400)))
+        if what == "functions":
+            return render("functions", insp.functions(ref, pattern, inherited, int(limit or 300)))
+        if what == "signature":
+            return render("signature", insp.signature(ref, str(args.get("name") or "")))
+        if what == "classes":
+            return render("classes", insp.classes(pattern, args.get("base") or None, str(args.get("kind") or "class"), int(limit or 200)))
+        if what == "target":
+            return render("target", insp.target(float(args.get("distance") or 5000), args.get("ref") or None))
+        raise ValueError("what is world, find, props, functions, signature, classes or target")
 
     def handle(self, msg: dict[str, Any]) -> dict[str, Any] | None:
         method, msg_id = msg.get("method"), msg.get("id")
