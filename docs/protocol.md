@@ -3,9 +3,8 @@
 `unreal-vibe-modding` talks to a running Unreal Engine game through files in a folder. Two programs inside the game
 can answer:
 
-- **UE4SS itself** (the external Lua REPL, [UE4SS PR #1475](https://github.com/UE4SS-RE/RE-UE4SS/pull/1475); preview
-  builds at [glitchbunny0/RE-UE4SS](https://github.com/glitchbunny0/RE-UE4SS/releases)). It can run code in any
-  started Lua mod.
+- **UE4SS itself** (the external Lua REPL, [UE4SS PR #1475](https://github.com/UE4SS-RE/RE-UE4SS/pull/1475), not merged
+  yet). It can run code in any started Lua mod.
 - **VibeBridge**, a Lua mod from this repository, for official UE4SS builds that have no external REPL. It can only
   run code in its own Lua state.
 

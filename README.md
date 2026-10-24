@@ -15,7 +15,7 @@ Python 3.9+, standard library only. MIT licensed.
 
 > **Status: early.** The client and the bridge are tested end to end off-game (CI). Live so far, in one UE 5.6 game
 > over SSH, with the CLI and the MCP server: VibeBridge on official UE4SS 3.0.1, and UE4SS's own external REPL on a
-> preview build. Expect rough edges, and please report them.
+> build with PR #1475. Expect rough edges, and please report them.
 
 ## How it reaches the game
 
@@ -23,7 +23,7 @@ Two things inside the game can answer `uvmod`; it finds out which one on its own
 
 | | What you install | Where code runs |
 |---|---|---|
-| **UE4SS's own external Lua REPL** | A UE4SS build with it ([PR #1475](https://github.com/UE4SS-RE/RE-UE4SS/pull/1475); until it is merged, preview builds at [glitchbunny0/RE-UE4SS](https://github.com/glitchbunny0/RE-UE4SS/releases)), with `ExternalLuaReplEnabled = 1` under `[Debug]` | In any started Lua mod (`--mod`), on the game thread, with a time limit UE4SS enforces |
+| **UE4SS's own external Lua REPL** | A UE4SS build with it ([PR #1475](https://github.com/UE4SS-RE/RE-UE4SS/pull/1475), not merged yet), with `ExternalLuaReplEnabled = 1` under `[Debug]` | In any started Lua mod (`--mod`), on the game thread, with a time limit UE4SS enforces |
 | **VibeBridge** | Any UE4SS build plus this repo's mod (`uvmod install-bridge`) | In VibeBridge's own Lua state, on the game thread, with a weaker time limit |
 
 Both use files in `<game>/Binaries/Win64/ue4ss/LuaRepl/`; see [docs/protocol.md](docs/protocol.md). There is no network

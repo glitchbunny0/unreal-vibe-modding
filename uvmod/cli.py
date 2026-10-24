@@ -114,7 +114,7 @@ Settings come from the environment or from the config file (KEY=value lines; the
   UVMOD_CONFIG     another config file path
 
 Two things can answer inside the game; uvmod finds out which:
-  UE4SS with the external Lua REPL (PR #1475; preview builds: github.com/glitchbunny0/RE-UE4SS/releases)
+  UE4SS with the external Lua REPL (PR #1475, not merged yet)
       with [Debug] ExternalLuaReplEnabled = 1 — runs code in any started Lua mod
   the VibeBridge mod, for official UE4SS builds — runs code in its own Lua state only
 """
