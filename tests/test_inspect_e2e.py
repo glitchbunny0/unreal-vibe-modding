@@ -117,6 +117,15 @@ class InspectEndToEnd(BridgeHarness, unittest.TestCase):
             self.i.call(PLANK, "Nudge", [1], lua_args="1")
         self.alive()
 
+    def test_call_by_path(self):
+        out = render("call", self.i.call("first:EnhancedInputLocalPlayerSubsystem",
+                                         "/Script/EnhancedInput.EnhancedInputSubsystemInterface:InjectInputVectorForAction",
+                                         ["/Game/Input/IA_Jump.IA_Jump", {"X": 1, "Y": 0, "Z": 0}, [], []]))
+        self.assertIn("called EnhancedInputSubsystemInterface::InjectInputVectorForAction(InputAction* Action", out)
+        self.assertEqual(self.game.exec("return FakeInjected[1]").answer["values"], ['"IA_Jump 1,0"'])
+        with self.assertRaisesRegex(LuaError, "no function /Script/Nope.Nope:Fly"):
+            self.i.call(PLANK, "/Script/Nope.Nope:Fly")
+
     def test_unguarded_string_for_fname_kills_the_fake(self):
         # The control for the guard: the same mistake without it ends the (fake) game, as it does the real one.
         r = self.game.exec('local p = FindFirstOf("BP_Plank_C") return p:Grab(FindFirstOf("Pawn"), "RightHand")')

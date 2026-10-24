@@ -100,7 +100,12 @@ names, wherever the parameter needs one:
 uvmod call first:BP_Door_C OpenDoor pawn true
 uvmod call pawn K2_SetActorLocation '{"X": 0, "Y": 0, "Z": 500}' false '{}' true
 uvmod call pawn ActorHasTag --lua 'FName("Player")'
+uvmod call first:EnhancedInputLocalPlayerSubsystem \
+    /Script/EnhancedInput.EnhancedInputSubsystemInterface:InjectInputVectorForAction \
+    /Game/Ride/Input/Actions/Player/IA_Jump.IA_Jump '{"X": 1, "Y": 0, "Z": 0}' '[]' '[]'
 ```
+
+A function given by its full path (an interface's function, for example) is called with the object as its context.
 
 To find out what an action changes, snapshot an object, act, and diff:
 

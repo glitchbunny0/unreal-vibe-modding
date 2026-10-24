@@ -274,7 +274,7 @@ TOOLS: list[dict[str, Any]] = [
             "return value): text becomes an FName, an FText, or the object a reference names (first:Class, /Path, pawn) "
             "where the parameter needs one; objects become tables ({\"X\": 1, \"Y\": 0, \"Z\": 0} for a vector); pass {} for "
             "an out parameter and read it in the answer. `lua_args` passes Lua expressions instead (e.g. "
-            "'FName(\"Hand\"), {X = 1}'). Use inspect signature first. A call changes the game: calling the game's own "
+            "'FName(\"Hand\"), {X = 1}'). `function` may be a full path (/Script/Pkg.Interface:Func) to call an interface's function with `ref` as its context. Use inspect signature first. A call changes the game: calling the game's own "
             "function keeps its logic and replication, unlike writing a property."
         ),
         "inputSchema": {

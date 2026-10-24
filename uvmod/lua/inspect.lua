@@ -426,7 +426,16 @@ do
             return "(" .. table.concat(ins, ", ") .. ")" .. (ret and (" -> " .. ret) or "")
         end
 
+        -- A function by name on the object's class chain, or by full path (an interface's function, say, called with
+        -- this object as its context).
         local function find_function(obj, name)
+            if type(name) == "string" and name:sub(1, 1) == "/" then
+                local f = valid_or_nil(try(function() return StaticFindObject(name) end))
+                if f and utype(f) == "UFunction" then
+                    return f, (name:match("[.]([^.:]+):[^:]+$") or "?")
+                end
+                return nil
+            end
             for _, cls in ipairs(class_chain(obj)) do
                 local found
                 pcall(function()
@@ -533,12 +542,14 @@ do
             end
             local values, problems = prepare(params, args)
             if #problems > 0 then
-                error("REFUSED " .. name .. signature_text(params) .. ": " .. table.concat(problems, "; "), 0)
+                error("REFUSED " .. (fname(f) or name) .. signature_text(params) .. ": " .. table.concat(problems, "; "), 0)
             end
             local n = math.max(args.n, #values)
-            local fn = obj[name]
+            -- By path: the UFunction itself, with the object as its context (UE4SS takes the context from the first
+            -- argument of an unbound UFunction). By name: the object's own member, bound to it.
+            local fn = name:sub(1, 1) == "/" and f or obj[name]
             local results = table.pack(fn(obj, table.unpack(values, 1, n)))
-            local lines = { line("O", fullname(obj)), line("F", owner, name, flags_text(f), signature_text(params)) }
+            local lines = { line("O", fullname(obj)), line("F", owner, fname(f) or name, flags_text(f), signature_text(params)) }
             for i = 1, results.n do lines[#lines + 1] = line("V", "=> " .. show(results[i])) end
             for i = 1, n do
                 if type(values[i]) == "table" and utype(values[i]) == nil then
