@@ -6,9 +6,10 @@ import argparse
 import json
 import os
 import sys
+import time
 from importlib import resources
 
-from . import __version__, protocol
+from . import __version__, journal, protocol
 from .config import KEYS, ConfigError, Settings
 from .game import Game, GameError, timeout_message
 from .reflection import Inspector, parse_cli_args, render
@@ -55,6 +56,13 @@ Reading the game (references: /Full/Path, first:Class, cdo:/Script/Pkg.Class, cl
   uvmod diff LABEL [REF] [--update]         what changed since the snapshot (--update: make now the new baseline)
   uvmod snaps | uvmod forget [LABEL]        list the snapshots / drop one (all without LABEL)
   uvmod target [DISTANCE] [--from REF]      what the camera looks at (a line trace, default 5000 cm)
+
+The game itself
+  uvmod launch | uvmod stop                 start the game (Steam, or UVMOD_LAUNCH) / end its process
+  uvmod restart [--timeout S]               stop, launch, and wait until a REPL answers (load new mod builds)
+  uvmod ready [--timeout S]                 wait until a REPL answers (default 180 s); exit 3 if it does not
+  uvmod crash                               why it died: crash folder, minidump stack, log tail, last requests sent
+  uvmod journal [N]                         the last N requests uvmod sent and how each ended
   uvmod install-bridge                      install the VibeBridge mod (for UE4SS builds without the external REPL)
   uvmod ps < script.ps1                     run PowerShell on the game box (ssh transport)
   uvmod mcp                                 MCP server on stdio, for AI agents
@@ -275,6 +283,12 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--from", dest="from_ref")
     for name in REFLECTION_COMMANDS:
         sub.choices[name].add_argument("--mod")
+    sub.add_parser("launch")
+    sub.add_parser("stop")
+    for name in ("ready", "restart"):
+        sub.add_parser(name).add_argument("--timeout", type=float, default=180.0)
+    sub.add_parser("crash")
+    sub.add_parser("journal").add_argument("count", nargs="?", type=int, default=10)
     sub.add_parser("install-bridge")
     sub.add_parser("ps")
     sub.add_parser("mcp")
@@ -322,6 +336,27 @@ def main(argv: list[str] | None = None) -> int:
             return cmd_watch(Watcher(game, args.mod), args)
         if args.cmd in REFLECTION_COMMANDS:
             return cmd_reflection(Inspector(game, args.mod), args)
+        if args.cmd == "launch":
+            print(game.launch())
+            return EXIT_OK
+        if args.cmd == "stop":
+            print(game.stop())
+            return EXIT_OK
+        if args.cmd in ("ready", "restart"):
+            if args.cmd == "restart":
+                print(game.stop())
+                time.sleep(2.0)
+                print(game.launch())
+                time.sleep(10.0)  # the old UE4SS.log and LuaRepl folder are still there for a few seconds
+            ok, text = game.ready(args.timeout)
+            print(text)
+            return EXIT_OK if ok else EXIT_NO_ANSWER
+        if args.cmd == "crash":
+            print(game.crash_report())
+            return EXIT_OK
+        if args.cmd == "journal":
+            print(journal.render(journal.tail(game.settings, args.count)))
+            return EXIT_OK
         if args.cmd == "install-bridge":
             print(game.push(bridge_dir()))
             game.transport.make_folder(protocol.FOLDER)

@@ -31,7 +31,8 @@ class BridgeHarness:
     def start(self, ini: bytes = b"[Debug]\r\nEnableHotReloadSystem = 0\r\n", folder: bool = True):
         self.dir = GameDir()
         (self.dir.ue4ss / "UE4SS-settings.ini").write_bytes(ini)
-        env = {"UVMOD_UE4SS": str(self.dir.ue4ss), "UVMOD_TRANSPORT": "local", "UVMOD_TIMEOUT": "5", "UVMOD_CONFIG": "/nonexistent"}
+        env = {"UVMOD_UE4SS": str(self.dir.ue4ss), "UVMOD_TRANSPORT": "local", "UVMOD_TIMEOUT": "5", "UVMOD_CONFIG": "/nonexistent",
+               "UVMOD_JOURNAL": self.dir.journal}
         os.environ.update(env)
         with redirect_stdout(io.StringIO()):
             self.assertEqual(cli.main(["install-bridge"]), 0)
@@ -51,7 +52,7 @@ class BridgeHarness:
         (self.dir.ue4ss / "STOP").touch()
         self.proc.wait(10)
         self.dir.close()
-        for k in ("UVMOD_UE4SS", "UVMOD_TRANSPORT", "UVMOD_TIMEOUT", "UVMOD_CONFIG"):
+        for k in ("UVMOD_UE4SS", "UVMOD_TRANSPORT", "UVMOD_TIMEOUT", "UVMOD_CONFIG", "UVMOD_JOURNAL"):
             os.environ.pop(k, None)
 
 

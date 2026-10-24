@@ -16,6 +16,9 @@ KEYS = {
     "UVMOD_TIMEOUT": "seconds to wait for an answer (default 10)",
     "UVMOD_PROCESS": "the game's process name (default: the *-Shipping.exe beside the ue4ss folder)",
     "UVMOD_SHOTS": "screenshot folder (default: <LocalAppData>/<Project>/Saved/Screenshots/Windows)",
+    "UVMOD_APPID": "the game's Steam app id, for `launch` (default: read from the Steam library the game is in)",
+    "UVMOD_LAUNCH": "a command that starts the game, for `launch` instead of Steam (run on the game's machine)",
+    "UVMOD_JOURNAL": "where uvmod records the requests it sends, for `crash` (default: ~/.local/state/uvmod/journal.jsonl; off: none)",
 }
 
 _LINE = re.compile(r"^\s*(UVMOD_[A-Z0-9_]+)\s*=\s*(.*?)\s*$")
@@ -59,6 +62,9 @@ class Settings:
     timeout: float = 10.0
     process: str = ""
     shots: str = ""
+    appid: str = ""
+    launch: str = ""
+    journal: str = ""
 
     @classmethod
     def load(cls, overrides: dict[str, str] | None = None) -> "Settings":
@@ -87,4 +93,7 @@ class Settings:
             timeout=timeout,
             process=values.get("UVMOD_PROCESS", ""),
             shots=values.get("UVMOD_SHOTS", ""),
+            appid=values.get("UVMOD_APPID", ""),
+            launch=values.get("UVMOD_LAUNCH", ""),
+            journal=values.get("UVMOD_JOURNAL", ""),
         )

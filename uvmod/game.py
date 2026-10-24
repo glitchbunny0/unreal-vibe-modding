@@ -10,7 +10,7 @@ import time
 from dataclasses import dataclass
 from typing import Any, Iterator
 
-from . import protocol
+from . import journal, protocol
 from .config import Settings
 from .transports import Status, Transport, make
 
@@ -58,12 +58,22 @@ class Game:
     def request(self, request: dict[str, Any], timeout: float | None = None) -> Result:
         request_id = protocol.new_id()
         wait = self.settings.timeout if timeout is None else timeout
+        journal.record(self.settings, {"id": request_id, "op": request.get("op"), "mod": request.get("mod", ""),
+                                       "code": journal.short_code(str(request.get("code", "")))})
         t0 = time.monotonic()
-        ex = self.transport.exchange(request_id, protocol.encode(request), protocol.encode(request, request_id), wait)
+        try:
+            ex = self.transport.exchange(request_id, protocol.encode(request), protocol.encode(request, request_id), wait)
+        except Exception as e:
+            journal.record(self.settings, {"id": request_id, "done": "failed", "error": f"{type(e).__name__}: {e}"[:300]})
+            raise
         elapsed = time.monotonic() - t0
         if ex.answer is None:
+            journal.record(self.settings, {"id": request_id, "done": "timeout", "ms": round(elapsed * 1000)})
             return Result(ex.delivery, None, elapsed)
-        return Result(ex.delivery, protocol.parse_answer(ex.answer), elapsed)
+        answer = protocol.parse_answer(ex.answer)
+        journal.record(self.settings, {"id": request_id, "done": "ok" if answer.get("ok") else "error",
+                                       "ms": round(elapsed * 1000), "error": str(answer.get("error", ""))[:300]})
+        return Result(ex.delivery, answer, elapsed)
 
     def mods(self) -> Result:
         return self.request(protocol.list_request())
@@ -135,3 +145,102 @@ class Game:
                 os.remove(png)
                 return out
         return png
+
+    # --- starting and stopping the game, and what to do when it died ---------------------------------------------
+
+    def launch(self) -> str:
+        return self.transport.launch()
+
+    def stop(self) -> str:
+        return self.transport.stop()
+
+    def ready(self, timeout: float = 180.0) -> tuple[bool, str]:
+        """Wait until a REPL answers: the game is up and its Lua mods have started. (ok, what happened)."""
+        t0 = time.monotonic()
+        saved, self.settings.timeout = self.settings.timeout, 3.0
+        try:
+            tries = 0
+            while True:
+                tries += 1
+                listed = self.mods()
+                elapsed = time.monotonic() - t0
+                if listed.answer and listed.answer.get("ok"):
+                    who = "VibeBridge" if listed.delivery == "bridge" else "UE4SS external REPL"
+                    return True, f"ready after {elapsed:.0f} s ({who}; mods: {', '.join(listed.answer.get('mods', []))})"
+                if elapsed >= timeout:
+                    return False, f"NOT READY after {elapsed:.0f} s: {timeout_message(listed.delivery, 3.0)}"
+                if elapsed > 30 and tries % 5 == 0 and self.status().running is False:
+                    return False, f"the game is not running ({elapsed:.0f} s after waiting began); see: uvmod crash"
+                time.sleep(2.0)
+        finally:
+            self.settings.timeout = saved
+
+    def crash_report(self, journal_count: int = 6) -> str:
+        """Everything that says why the game died: is it running, the newest crash folder (Unreal's CrashContext and
+        minidump), UE4SS's own crash dump, the end of UE4SS.log, and the last requests uvmod sent."""
+        from .crash import parse_crash_context, parse_minidump
+
+        now = time.time()
+        out: list[str] = []
+        st = self.status()
+        out.append("game: " + ("running" if st.running else "not running" if st.running is False else "unknown")
+                   + (f" ({st.process}, started {st.started})" if st.running else ""))
+        files = self.transport.crash_files()
+        folders, dumps = files.get("folders") or [], files.get("dumps") or []
+        tmp = tempfile.mkdtemp(prefix="uvmod-crash-")
+
+        def age(t: float) -> str:
+            m = max(0, int((now - t) / 60))
+            return f"{m} min ago" if m < 120 else time.strftime("%Y-%m-%d %H:%M", time.localtime(t))
+
+        def minidump(path: str) -> list[str]:
+            local = os.path.join(tmp, os.path.basename(path.replace("\\", "/")))
+            try:
+                self.transport.fetch(path, local)
+                with open(local, "rb") as f:
+                    return parse_minidump(f.read()).describe()
+            except Exception as e:  # a damaged or locked dump should not hide the rest of the report
+                return [f"minidump: could not read {path}: {e}"]
+
+        if st.running and (folders or dumps):
+            out.append("(the game is running now: the crash evidence below is from an earlier session)")
+        if folders:
+            f = folders[0]
+            path = f["path"].rstrip("/\\")
+            out.append(f"\nnewest Unreal crash folder ({age(f['time'])}): {path}")
+            names = f.get("files") or []
+            if "CrashContext.runtime-xml" in names:
+                try:
+                    ctx = parse_crash_context(self.transport.read_text(path + "/CrashContext.runtime-xml"))
+                    if ctx.error:
+                        out.append(f"error: {ctx.error}")
+                    if ctx.engine:
+                        out.append(f"engine: {ctx.engine}" + ("" if ctx.has_ue4ss is None else
+                                                              f"; UE4SS.dll loaded: {'yes' if ctx.has_ue4ss else 'no'}"))
+                    if ctx.callstack:
+                        out.append("call stack (Unreal's, unsymbolized frames are module+offset):")
+                        out += ["  " + l for l in ctx.callstack[:25]]
+                except Exception as e:
+                    out.append(f"CrashContext.runtime-xml: could not read it: {e}")
+            dmp = next((n for n in names if n.lower().endswith(".dmp")), None)
+            if dmp:
+                described = minidump(path + "/" + dmp)
+                if any(l.startswith("call stack") for l in out):  # Unreal's own stack says more; keep the scan short
+                    described = described[:16]
+                out += described
+        else:
+            out.append("\nno Unreal crash folder")
+        if dumps and (not folders or dumps[0]["time"] >= folders[0]["time"] - 120):
+            d = dumps[0]
+            out.append(f"\nUE4SS crash dump ({age(d['time'])}): {d['path']}")
+            out += minidump(d["path"])
+        out.append("\nUE4SS.log, last lines (without the external REPL's per-request lines):")
+        out += ["  " + l for l in [l for l in self.log(400) if "[ExternalLuaRepl] Request " not in l][-25:]]
+        entries = journal.tail(self.settings, journal_count)
+        out.append("\nlast requests uvmod sent (a request with no answer right before the crash is the first suspect):")
+        out += ["  " + l for l in journal.render(entries).splitlines()]
+        if any("ue4ss.dll+" in l.lower() for l in out):
+            out.append("\nUE4SS.dll offsets symbolize with the PDB of the same build: "
+                       "llvm-symbolizer --obj=UE4SS.dll --relative-address --functions=linkage --demangle 0x...")
+        shutil.rmtree(tmp, ignore_errors=True)
+        return "\n".join(out)

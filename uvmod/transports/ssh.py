@@ -278,6 +278,86 @@ if ($f) {{ $f.FullName.Replace('\\','/') + '|' + $f.LastWriteTime.Ticks }}
     def make_folder(self, name: str) -> None:
         self.powershell(f"New-Item -ItemType Directory -Force (Join-Path $u {psq(name)}) | Out-Null", timeout=60)
 
+    # --- starting and stopping the game ---------------------------------------------------------------------------
+
+    def launch(self) -> str:
+        # A program started over SSH runs in the SSH session, where a game has no desktop. A scheduled task with an
+        # interactive principal starts it in the logged-in user's session instead.
+        script = f"""
+$launch = {psq(self.settings.launch)}
+$appid = {psq(self.settings.appid)}
+if ($launch) {{ $exe = 'cmd.exe'; $arg = '/c ' + $launch }}
+else {{
+  if (-not $appid) {{
+    $common = $u -replace '(?i)(\\\\steamapps\\\\common\\\\[^\\\\]+).*$', '$1'
+    $lib = Split-Path (Split-Path $common)
+    $dir = Split-Path $common -Leaf
+    foreach ($m in Get-ChildItem -File -Filter 'appmanifest_*.acf' $lib -ErrorAction SilentlyContinue) {{
+      $t = Get-Content -Raw $m.FullName
+      if ($t -match ('"installdir"\\s+"' + [regex]::Escape($dir) + '"') -and $t -match '"appid"\\s+"(\\d+)"') {{ $appid = $Matches[1]; break }}
+    }}
+  }}
+  if (-not $appid) {{ 'ERROR: no Steam app id: set UVMOD_APPID (or UVMOD_LAUNCH)'; exit 0 }}
+  $steam = (Get-ItemProperty 'HKCU:\\Software\\Valve\\Steam' -ErrorAction SilentlyContinue).SteamExe
+  if (-not $steam) {{ $steam = 'C:\\Program Files (x86)\\Steam\\steam.exe' }}
+  $exe = $steam; $arg = '-applaunch ' + $appid
+}}
+try {{
+  $a = New-ScheduledTaskAction -Execute $exe -Argument $arg
+  $p = New-ScheduledTaskPrincipal -UserId "$env:COMPUTERNAME\\$env:USERNAME" -LogonType Interactive
+  Register-ScheduledTask -TaskName 'uvmod-launch' -Action $a -Principal $p -Force -ErrorAction Stop | Out-Null
+  Start-ScheduledTask -TaskName 'uvmod-launch' -ErrorAction Stop
+  "started $exe $arg (in the logged-in session)"
+}} catch {{ 'ERROR: ' + $_.Exception.Message }}
+"""
+        out = self.powershell(script, timeout=60).strip()
+        if out.startswith("ERROR: "):
+            raise TransportError(out[len("ERROR: "):])
+        return out
+
+    def stop(self) -> str:
+        script = """
+if (-not $proc) { 'ERROR: unknown game process (set UVMOD_PROCESS)'; exit 0 }
+if (-not (Get-Game)) { "$proc is not running"; exit 0 }
+Get-Process -Name $proc, CrashReportClient -ErrorAction SilentlyContinue | Stop-Process -Force
+$sw = [Diagnostics.Stopwatch]::StartNew()
+while ((Get-Game) -and $sw.Elapsed.TotalSeconds -lt 10) { Start-Sleep -Milliseconds 200 }
+if (Get-Game) { "$proc is still running" } else { "stopped $proc" }
+"""
+        out = self.powershell(script, timeout=60).strip()
+        if out.startswith("ERROR: "):
+            raise TransportError(out[len("ERROR: "):])
+        return out
+
+    # --- crashes --------------------------------------------------------------------------------------------------
+
+    def crash_files(self) -> dict:
+        script = """
+function T($i) { [DateTimeOffset]::new($i.LastWriteTimeUtc).ToUnixTimeSeconds() }
+$r = [ordered]@{ folders = @(); dumps = @() }
+if ($proc) {
+  $c = Join-Path $env:LOCALAPPDATA (($proc -replace '-(Win64|WinGDK)-Shipping$', '') + '\\Saved\\Crashes')
+  $r.folders = @(Get-ChildItem -Directory $c -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 3 |
+    ForEach-Object { [ordered]@{ path = $_.FullName.Replace('\\','/'); time = (T $_); files = @(Get-ChildItem -File $_.FullName | ForEach-Object { [string]$_.Name }) } })
+}
+$r.dumps = @(Get-ChildItem -File -Filter 'crash_*.dmp' $u -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 3 |
+  ForEach-Object { [ordered]@{ path = $_.FullName.Replace('\\','/'); time = (T $_) } })
+$r | ConvertTo-Json -Compress -Depth 5
+"""
+        data = json.loads(self.powershell(script, timeout=60).strip() or "{}")
+        for key in ("folders", "dumps"):
+            value = data.get(key) or []
+            data[key] = value if isinstance(value, list) else [value]
+            for item in data[key]:
+                files = item.get("files")
+                if files is not None and not isinstance(files, list):
+                    item["files"] = [files]
+        return data
+
+    def read_text(self, path: str) -> str:
+        out = self.powershell(f"[Convert]::ToBase64String([IO.File]::ReadAllBytes({psq(path)}))", timeout=60).strip()
+        return base64.b64decode(out).decode("utf-8", errors="replace")
+
     def fetch(self, path: str, dest: str) -> None:
         done = subprocess.run(["scp", "-q", "-o", "BatchMode=yes", f"{self.settings.host}:{path}", dest],
                               capture_output=True, timeout=120)

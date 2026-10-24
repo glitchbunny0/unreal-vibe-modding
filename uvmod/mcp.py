@@ -6,6 +6,7 @@ import base64
 import json
 import os
 import sys
+import time
 import traceback
 from typing import Any
 
@@ -128,6 +129,25 @@ TOOLS: list[dict[str, Any]] = [
         "name": "swap",
         "description": "For a mod built as a hot-swap shell: pushes it and swaps its logic in the running game without a restart. Fails if the running mod is not a shell yet.",
         "inputSchema": {"type": "object", "properties": {"dir": {"type": "string"}}, "required": ["dir"]},
+    },
+    {
+        "name": "game",
+        "description": (
+            "Starts and stops the game, and finds out why it died. `launch` starts it (Steam, or the UVMOD_LAUNCH "
+            "command), `stop` ends its process, `restart` does both and waits until a REPL answers (that is how new mod "
+            "builds load), `ready` waits for a REPL (up to `timeout_s`), `crash` reports why it died: the newest crash "
+            "folder (error, call stack, the faulting module and offset from the minidump), the end of UE4SS.log, and the "
+            "last requests sent from here (the one without an answer is the first suspect). After a crash, read `crash` "
+            "before restarting, and do not repeat the call that killed it."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "enum": ["launch", "stop", "restart", "ready", "crash"]},
+                "timeout_s": {"type": "number", "minimum": 10, "maximum": 600},
+            },
+            "required": ["action"],
+        },
     },
     {
         "name": "inspect",
@@ -271,6 +291,25 @@ class Server:
         if name == "swap":
             ok, answer = game.swap(str(args["dir"]))
             return text(answer, not ok)
+        if name == "game":
+            action = args.get("action")
+            timeout = float(args.get("timeout_s") or 180)
+            if action == "launch":
+                return text(game.launch())
+            if action == "stop":
+                return text(game.stop())
+            if action == "crash":
+                return text(game.crash_report())
+            if action in ("ready", "restart"):
+                lines = []
+                if action == "restart":
+                    lines.append(game.stop())
+                    time.sleep(2.0)
+                    lines.append(game.launch())
+                    time.sleep(10.0)
+                ok, answer = game.ready(timeout)
+                return text("\n".join(lines + [answer]), not ok)
+            raise ValueError("action is launch, stop, restart, ready or crash")
         if name in ("inspect", "call", "snapshot"):
             return text(self._reflection(game, name, args))
         raise KeyError(name)

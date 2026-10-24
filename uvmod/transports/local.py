@@ -225,10 +225,14 @@ class LocalTransport(Transport):
     def _shots_dir(self) -> Path | None:
         if self.settings.shots:
             return Path(self.settings.shots)
+        return self._saved_dir("Screenshots/Windows")
+
+    def _saved_dir(self, sub: str) -> Path | None:
+        """<LocalAppData>/<Project>/Saved/<sub>: on Windows, or in the game's Proton prefix."""
         project = re.sub(r"-(Win64|WinGDK)-Shipping$", "", self._process())
         if not project:
             return None
-        rel = Path(project) / "Saved" / "Screenshots" / "Windows"
+        rel = Path(project) / "Saved" / sub
         if os.environ.get("LOCALAPPDATA") and (Path(os.environ["LOCALAPPDATA"]) / rel).is_dir():
             return Path(os.environ["LOCALAPPDATA"]) / rel
         parts = self.root.as_posix().split("/steamapps/")
@@ -237,6 +241,79 @@ class LocalTransport(Transport):
             for d in glob.glob(pattern):
                 return Path(d)
         return None
+
+    # --- starting and stopping the game ---------------------------------------------------------------------------
+
+    def appid(self) -> str:
+        """UVMOD_APPID, else the Steam library's appmanifest whose installdir holds this game."""
+        if self.settings.appid:
+            return self.settings.appid
+        parts = self.root.as_posix().split("/steamapps/common/")
+        if len(parts) < 2:
+            return ""
+        installdir = parts[1].split("/")[0]
+        for manifest in glob.glob(f"{parts[0]}/steamapps/appmanifest_*.acf"):
+            try:
+                text = Path(manifest).read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            if re.search(r'"installdir"\s+"' + re.escape(installdir) + '"', text, re.I):
+                m = re.search(r'"appid"\s+"(\d+)"', text)
+                if m:
+                    return m.group(1)
+        return ""
+
+    def launch(self) -> str:
+        if self.settings.launch:
+            subprocess.Popen(self.settings.launch, shell=True, start_new_session=os.name != "nt",
+                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            return f"started: {self.settings.launch}"
+        appid = self.appid()
+        if not appid:
+            raise TransportError("no Steam app id: set UVMOD_APPID (or UVMOD_LAUNCH to a command that starts the game)")
+        url = f"steam://rungameid/{appid}"
+        if os.name == "nt":
+            os.startfile(url)  # type: ignore[attr-defined]  # Windows only
+        else:
+            opener = shutil.which("steam") or shutil.which("xdg-open")
+            if not opener:
+                raise TransportError("neither steam nor xdg-open is on PATH; set UVMOD_LAUNCH")
+            subprocess.Popen([opener, url], start_new_session=True, stdin=subprocess.DEVNULL,
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return f"asked Steam to start app {appid}"
+
+    def stop(self) -> str:
+        process = self._process()
+        if not process:
+            raise TransportError("unknown game process (set UVMOD_PROCESS)")
+        if self._pid(process) is None:
+            return f"{process} is not running"
+        if os.name == "nt":
+            subprocess.run(["taskkill", "/IM", f"{process}.exe", "/F"], capture_output=True, timeout=30)
+            subprocess.run(["taskkill", "/IM", "CrashReportClient.exe", "/F"], capture_output=True, timeout=30)
+        else:
+            subprocess.run(["pkill", "-f", "--", process], capture_output=True, timeout=30)
+        for _ in range(50):
+            if self._pid(process) is None:
+                return f"stopped {process}"
+            time.sleep(0.2)
+        return f"{process} is still running"
+
+    # --- crashes --------------------------------------------------------------------------------------------------
+
+    def crash_files(self) -> dict:
+        out: dict = {"folders": [], "dumps": []}
+        crashes = self._saved_dir("Crashes")
+        if crashes and crashes.is_dir():
+            folders = sorted((p for p in crashes.iterdir() if p.is_dir()), key=lambda p: p.stat().st_mtime, reverse=True)
+            out["folders"] = [{"path": str(p), "time": p.stat().st_mtime, "files": sorted(f.name for f in p.iterdir())}
+                              for p in folders[:3]]
+        dumps = sorted(self.root.glob("crash_*.dmp"), key=lambda p: p.stat().st_mtime, reverse=True)
+        out["dumps"] = [{"path": str(p), "time": p.stat().st_mtime} for p in dumps[:3]]
+        return out
+
+    def read_text(self, path: str) -> str:
+        return Path(path).read_text(encoding="utf-8", errors="replace")
 
     def newest_shot(self) -> tuple[str, str] | None:
         d = self._shots_dir()

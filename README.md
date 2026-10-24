@@ -128,6 +128,25 @@ that. The capture runs inside the game on every call, without a time limit, so k
 `--post` records after the call instead. UE4SS runs post callbacks for native functions only, so `watch` refuses
 `--post` on a Blueprint function. In a post capture, `...` starts with the function's return value, if it has one.
 
+### Starting the game, and when it dies
+
+```sh
+uvmod restart                   # stop, launch, wait until a REPL answers: how new mod builds load
+uvmod launch | uvmod stop       # Steam (app id read from the Steam library, or UVMOD_APPID), or UVMOD_LAUNCH
+uvmod ready                     # wait until a REPL answers (default 180 s)
+uvmod crash                     # why it died
+uvmod journal                   # the last requests sent from here, and how each ended
+```
+
+`crash` puts together what says why the game died: the newest Unreal crash folder (its error message and call stack,
+and the exception, faulting module and return addresses read from its minidump), UE4SS's own crash dump, the end of
+`UE4SS.log`, and the last requests uvmod sent. uvmod writes every request to a journal before it goes out
+(`~/.local/state/uvmod/journal.jsonl`; `UVMOD_JOURNAL=off` turns it off), so a request without an answer right before
+a crash is the first suspect. Module offsets symbolize with the PDB of the same build (`llvm-symbolizer`).
+
+With the ssh transport, `launch` starts the game through a scheduled task (`uvmod-launch`) in the logged-in user's
+session, because a program started over SSH has no desktop.
+
 ### As an MCP server
 
 ```json
@@ -135,7 +154,7 @@ that. The capture runs inside the game on every call, without a time limit, so k
 ```
 
 Tools: `lua`, `mods`, `status`, `log`, `screenshot`, `inspect`, `call`, `snapshot`, `watch`, `events`, `wait`, `unwatch`,
-`push`, `swap`. Their descriptions carry the rules that crash games when broken, because that is what an agent reads.
+`push`, `swap`, `game`. Their descriptions carry the rules that crash games when broken, because that is what an agent reads.
 
 ## Safety
 

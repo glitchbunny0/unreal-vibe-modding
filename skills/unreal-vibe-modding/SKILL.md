@@ -59,6 +59,15 @@ These freeze the game, or make it misbehave later:
 - **Prefer the game's own functions over writing properties.** Calling the function keeps the game's own logic,
   replication and side effects. A direct property write can be local-only, or be overwritten next frame.
 
+## When the game dies or freezes
+
+- Run `game` `crash` before anything else, and read it: the error, the stack, and the last request sent from here
+  (marked "no answer") usually name the cause. Do not send that request again in the same form.
+- Then `game` `restart`, which waits until a REPL answers. Helpers (`watch`, `inspect`) and their state are gone after
+  a restart; watches have to be set up again.
+- A frozen game (no answer, process still running) is usually a long native call or an endless loop with the guard
+  off. `game` `stop`, then restart.
+
 ## Building the mod
 
 - Keep the probe code and the mod apart. Probe with `lua`; write the mod as files, `push` it, and restart the game to

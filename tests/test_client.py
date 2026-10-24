@@ -38,9 +38,10 @@ class GameDir:
         (self.ue4ss / "UE4SS.log").write_bytes(b"[x] UE4SS - v3.0.1\r\n[x] [ExternalLuaRepl] Enabled.\r\n"
                                                b"[x] [ExternalLuaRepl] Request 0123abcd for mod 'Alpha'\r\nother line\r\n")
         self.folder = self.ue4ss / "LuaRepl"
+        self.journal = str(Path(self.tmp.name) / "journal.jsonl")
 
     def settings(self, **kw) -> Settings:
-        env = {"UVMOD_UE4SS": str(self.ue4ss), "UVMOD_TRANSPORT": "local", "UVMOD_TIMEOUT": "2"}
+        env = {"UVMOD_UE4SS": str(self.ue4ss), "UVMOD_TRANSPORT": "local", "UVMOD_TIMEOUT": "2", "UVMOD_JOURNAL": self.journal}
         env.update(kw)
         return Settings.load(env)
 
@@ -176,7 +177,8 @@ class NativeTests(unittest.TestCase):
         self.assertFalse((self.dir.ue4ss / "Mods" / "MyMod" / "hotswap" / "req").exists())
 
     def test_cli(self):
-        os.environ.update({"UVMOD_UE4SS": str(self.dir.ue4ss), "UVMOD_TRANSPORT": "local", "UVMOD_TIMEOUT": "2", "UVMOD_CONFIG": "/nonexistent"})
+        os.environ.update({"UVMOD_UE4SS": str(self.dir.ue4ss), "UVMOD_TRANSPORT": "local", "UVMOD_TIMEOUT": "2", "UVMOD_CONFIG": "/nonexistent",
+                           "UVMOD_JOURNAL": self.dir.journal})
         try:
             def run(*argv):
                 out, err = io.StringIO(), io.StringIO()
@@ -206,7 +208,7 @@ class NativeTests(unittest.TestCase):
             self.assertEqual(run("bogus")[0], 2)
             self.assertEqual(run("help")[0], 0)
         finally:
-            for k in ("UVMOD_UE4SS", "UVMOD_TRANSPORT", "UVMOD_TIMEOUT", "UVMOD_CONFIG"):
+            for k in ("UVMOD_UE4SS", "UVMOD_TRANSPORT", "UVMOD_TIMEOUT", "UVMOD_CONFIG", "UVMOD_JOURNAL"):
                 os.environ.pop(k, None)
 
 
@@ -263,7 +265,7 @@ class McpTests(unittest.TestCase):
         self.fake = FakeGame(self.dir.folder, "native", mods=("Alpha",))
         self.fake.start()
         env = dict(os.environ, UVMOD_UE4SS=str(self.dir.ue4ss), UVMOD_TRANSPORT="local", UVMOD_TIMEOUT="2", UVMOD_CONFIG="/nonexistent",
-                   PYTHONPATH=str(ROOT))
+                   UVMOD_JOURNAL=self.dir.journal, PYTHONPATH=str(ROOT))
         self.proc = subprocess.Popen([sys.executable, "-m", "uvmod", "mcp"], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                      text=True, env=env, cwd=str(ROOT))
 
@@ -291,7 +293,7 @@ class McpTests(unittest.TestCase):
         self.rpc("notifications/initialized", msg_id=None)
         tools = {t["name"] for t in self.rpc("tools/list", msg_id=2)["result"]["tools"]}
         self.assertEqual(tools, {"lua", "mods", "status", "log", "screenshot", "watch", "events", "wait", "unwatch", "push", "swap",
-                                 "inspect", "call", "snapshot"})
+                                 "inspect", "call", "snapshot", "game"})
         r = self.rpc("tools/call", {"name": "lua", "arguments": {"code": "1 + 1"}}, msg_id=3)["result"]
         self.assertFalse(r["isError"])
         self.assertTrue(r["content"][0]["text"].startswith("=> 2\nOK\n(UE4SS,"))

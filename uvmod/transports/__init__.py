@@ -63,6 +63,22 @@ class Transport:
         """Create a folder inside the ue4ss folder (the LuaRepl folder for VibeBridge)."""
         raise NotImplementedError
 
+    def launch(self) -> str:
+        """Start the game (UVMOD_LAUNCH, else Steam with UVMOD_APPID or the app id found in the Steam library)."""
+        raise NotImplementedError
+
+    def stop(self) -> str:
+        """End the game's process (and Unreal's crash reporter)."""
+        raise NotImplementedError
+
+    def crash_files(self) -> dict:
+        """The newest crash evidence: {"folders": [{"path", "time", "files"}], "dumps": [{"path", "time"}]}, newest first.
+        Folders are Unreal's Saved/Crashes/<id>; dumps are UE4SS's own crash_*.dmp. Times are Unix seconds."""
+        raise NotImplementedError
+
+    def read_text(self, path: str) -> str:
+        raise NotImplementedError
+
     def powershell(self, script: str) -> str:
         raise TransportError("this needs the ssh transport (a Windows box reached over SSH)")
 
