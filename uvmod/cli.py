@@ -57,6 +57,15 @@ Reading the game (references: /Full/Path, first:Class, cdo:/Script/Pkg.Class, cl
   uvmod snaps | uvmod forget [LABEL]        list the snapshots / drop one (all without LABEL)
   uvmod target [DISTANCE] [--from REF]      what the camera looks at (a line trace, default 5000 cm)
 
+The game's reflection, offline (an index built from UE4SS's own dump; no game needed once it is built)
+  uvmod index [--from FILE.jmap] [--native-only] [--keep]   dump the running game's reflection (DumpJMAP) and index it
+  uvmod api search TEXT [--kind class|struct|enum|function|property] [--limit N]
+  uvmod api class NAME|PATH [--inherited]   properties (with defaults) and functions of a class, struct or enum
+  uvmod api sig [Class:]Function            parameters with in / out / ref roles (what `call` needs)
+  uvmod api subclasses NAME                 every class derived from it
+  uvmod check PATH ...                      read a mod's Lua against the index: a string or nil where a UFunction
+        takes an FName is a native crash (error, exit 1); argument counts no function accepts (warning)
+
 The game itself
   uvmod launch | uvmod stop                 start the game (Steam, or UVMOD_LAUNCH) / end its process
   uvmod restart [--timeout S]               stop, launch, and wait until a REPL answers (load new mod builds)
@@ -195,6 +204,57 @@ def cmd_reflection(insp: Inspector, args) -> int:
     return EXIT_OK
 
 
+def open_index():
+    """The index `api` and `check` read; works without UVMOD_UE4SS (offline)."""
+    from .index import Index, find
+
+    try:
+        settings = Settings.load()
+        pinned, ue4ss = settings.index, settings.ue4ss
+    except ConfigError:
+        pinned, ue4ss = os.environ.get("UVMOD_INDEX", ""), ""
+    path = find(pinned, ue4ss)
+    if path is None:
+        raise ConfigError("no reflection index yet: run `uvmod index` with the game running (or set UVMOD_INDEX)")
+    return Index(path)
+
+
+def api_answer(ix, action: str, what: str, kind: str = "", limit: int = 40, inherited: bool = False) -> str:
+    if action == "info":
+        return f"{ix.path}\n{ix.header()}"
+    if not what:
+        raise ValueError(f"api {action} needs a name")
+    if action == "search":
+        lines = ix.search(what, kind, limit)
+    elif action == "class":
+        lines = ix.describe(what, inherited)
+    elif action == "sig":
+        lines = ix.signature(what)
+    else:
+        lines = ix.subclasses(what, max(limit, 200))
+    return "\n".join(lines + [ix.header()])
+
+
+def cmd_offline(args) -> int:
+    from .lint import check_paths
+
+    try:
+        ix = open_index()
+        if args.cmd == "api":
+            print(api_answer(ix, args.action, args.what, args.kind, args.limit, args.inherited))
+            return EXIT_OK
+        findings = check_paths(ix, args.paths)
+        for f in findings:
+            print(f)
+        errors = sum(1 for f in findings if f.severity == "error")
+        print(f"{errors} error{'s' if errors != 1 else ''}, {len(findings) - errors} warning{'s' if len(findings) - errors != 1 else ''} "
+              + ix.header())
+        return EXIT_LUA_ERROR if errors else EXIT_OK
+    except (ConfigError, ValueError, OSError) as e:
+        print(f"uvmod: {e}", file=sys.stderr)
+        return EXIT_USAGE
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     if not argv or argv[0] in ("help", "-h", "--help"):
@@ -283,6 +343,17 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--from", dest="from_ref")
     for name in REFLECTION_COMMANDS:
         sub.choices[name].add_argument("--mod")
+    p = sub.add_parser("index")
+    p.add_argument("--from", dest="from_file")
+    p.add_argument("--native-only", action="store_true")
+    p.add_argument("--keep", action="store_true")
+    p = sub.add_parser("api")
+    p.add_argument("action", choices=("search", "class", "sig", "subclasses", "info"))
+    p.add_argument("what", nargs="?", default="")
+    p.add_argument("--kind", default="", choices=("", "class", "struct", "enum", "function", "property"))
+    p.add_argument("--limit", type=int, default=40)
+    p.add_argument("--inherited", action="store_true")
+    sub.add_parser("check").add_argument("paths", nargs="+")
     sub.add_parser("launch")
     sub.add_parser("stop")
     for name in ("ready", "restart"):
@@ -302,6 +373,8 @@ def main(argv: list[str] | None = None) -> int:
         from .mcp import serve
 
         return serve()
+    if args.cmd in ("api", "check"):
+        return cmd_offline(args)
 
     try:
         game = Game(Settings.load())
@@ -336,6 +409,9 @@ def main(argv: list[str] | None = None) -> int:
             return cmd_watch(Watcher(game, args.mod), args)
         if args.cmd in REFLECTION_COMMANDS:
             return cmd_reflection(Inspector(game, args.mod), args)
+        if args.cmd == "index":
+            print(game.build_index(args.from_file, not args.native_only, args.keep))
+            return EXIT_OK
         if args.cmd == "launch":
             print(game.launch())
             return EXIT_OK

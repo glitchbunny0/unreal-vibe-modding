@@ -150,6 +150,32 @@ TOOLS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "api",
+        "description": (
+            "Answers from the reflection index, offline, without touching the game: built from the game's own reflection "
+            "dump (`uvmod index`, once per game build). `search` finds classes, structs, enums, functions and properties "
+            "whose name contains `text` (ranked: exact, prefix, contains); `class` lists a class's (or struct's, enum's) "
+            "properties with their defaults and its functions with signatures (`inherited` adds the parents'); `sig` gives "
+            "a function's parameters with their roles (in, out: pass {} and read it after, ref, return) as `Class:Function` "
+            "or a unique name; `subclasses`; `check` reads a mod's Lua files at `path` (on this machine) and reports a "
+            "string or nil passed where a UFunction takes an FName (a native crash) and impossible argument counts. "
+            "Prefer it over live inspection for finding names: it covers everything the game had loaded when it was "
+            "dumped, costs nothing, and cannot crash anything."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "enum": ["search", "class", "sig", "subclasses", "check", "info"]},
+                "text": {"type": "string", "description": "search: part of a name; class/sig/subclasses: a name or path"},
+                "kind": {"type": "string", "enum": ["class", "struct", "enum", "function", "property"]},
+                "inherited": {"type": "boolean"},
+                "path": {"type": "string", "description": "check: a mod folder or .lua file on this machine"},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 500},
+            },
+            "required": ["action"],
+        },
+    },
+    {
         "name": "inspect",
         "description": (
             "Reads the game's reflection without changing anything. Start an exploration here, before writing Lua. "
@@ -241,6 +267,19 @@ class Server:
         return self.game
 
     def call(self, name: str, args: dict[str, Any]) -> dict[str, Any]:
+        if name == "api":
+            from .cli import api_answer, open_index
+            from .lint import check_paths
+
+            ix = open_index()
+            action = str(args.get("action") or "")
+            if action == "check":
+                findings = check_paths(ix, [str(args.get("path") or "")])
+                errors = sum(1 for f in findings if f.severity == "error")
+                body = "\n".join(str(f) for f in findings) or "no findings"
+                return text(f"{body}\n{errors} errors, {len(findings) - errors} warnings {ix.header()}", errors > 0)
+            return text(api_answer(ix, action, str(args.get("text") or ""), str(args.get("kind") or ""),
+                                   int(args.get("limit") or 40), bool(args.get("inherited"))))
         game = self._game()
         if name in ("lua", "mods"):
             if name == "lua":

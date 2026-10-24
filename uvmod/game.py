@@ -244,3 +244,47 @@ class Game:
                        "llvm-symbolizer --obj=UE4SS.dll --relative-address --functions=linkage --demangle 0x...")
         shutil.rmtree(tmp, ignore_errors=True)
         return "\n".join(out)
+
+    # --- the reflection index -------------------------------------------------------------------------------------
+
+    def build_index(self, from_file: str | None = None, blueprints: bool = True, keep: bool = False) -> str:
+        """Dump the game's reflection with UE4SS's DumpJMAP, copy it here and build the SQLite index from it (or
+        build from a .jmap file already here). Returns a report."""
+        from . import index
+
+        folder = index.folder()
+        folder.mkdir(parents=True, exist_ok=True)
+        lines = []
+        if from_file:
+            jmap = from_file
+        else:
+            t0 = time.monotonic()
+            saved, self.settings.timeout = self.settings.timeout, 900.0
+            try:
+                result = self.exec(f"DumpJMAP({'true' if blueprints else 'false'}) return 'ok'", None, 5000)
+            finally:
+                self.settings.timeout = saved
+            if result.answer is None:
+                raise GameError(timeout_message(result.delivery, 900.0))
+            if not result.ok:
+                err = str(result.answer.get("error", ""))
+                if "DumpJMAP" in err and "nil" in err:
+                    raise GameError("this UE4SS build has no DumpJMAP (UE4SS experimental 1181 and newer have it)")
+                raise GameError(f"DumpJMAP failed: {err.splitlines()[0] if err else '?'}")
+            dumps = self.transport.files("*.jmap")
+            if not dumps:
+                raise GameError("DumpJMAP ran, but no .jmap file is in the ue4ss folder (see: uvmod log 20 JMapGenerator)")
+            remote = dumps[0]["path"]
+            lines.append(f"dumped in {time.monotonic() - t0:.0f} s: {remote} ({dumps[0]['size'] // (1 << 20)} MB, left in place)")
+            jmap = str(folder / os.path.basename(remote.replace("\\", "/")))
+            t1 = time.monotonic()
+            self.transport.fetch_large(remote, jmap)
+            lines.append(f"copied in {time.monotonic() - t1:.0f} s")
+        t2 = time.monotonic()
+        db = folder / index.index_name(os.path.basename(jmap))
+        counts = index.build(jmap, str(db))
+        lines.append(f"indexed in {time.monotonic() - t2:.0f} s: " + ", ".join(f"{v} {k}" for k, v in counts.items()))
+        lines.append(f"index: {db}")
+        if not from_file and not keep:
+            os.remove(jmap)
+        return "\n".join(lines)

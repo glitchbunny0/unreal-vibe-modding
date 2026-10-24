@@ -303,3 +303,18 @@ table.insert(class_data(KSL).functions, FakeFunction("/Script/Engine.KismetSyste
 end))
 
 function FakePlank() return plank end
+
+-- DumpJMAP writes a small .jmap into the ue4ss folder, as UE4SS does (the format by trumank, a few objects only).
+function DumpJMAP()
+    local f = assert(io.open(FAKE_UE4SS_DIR .. "/FakeGame-5.6.0-1-fake.jmap", "w"))
+    f:write([[{"metadata": {"source": "FakeGame-Win64-Shipping.exe", "engine_version": {"major": 5, "minor": 6},
+ "build_change_list": "1", "timestamp": "2026-10-24T00:00:00Z"},
+ "objects": {
+  "/Script/Engine.Actor": {"type": "Class", "super_struct": "/Script/CoreUObject.Object", "properties": []},
+  "/Script/Engine.Actor:ActorHasTag": {"type": "Function", "outer": "/Script/Engine.Actor", "function_flags": "FUNC_Native",
+    "properties": [{"name": "Tag", "type": "NameProperty", "flags": "CPF_Parm"},
+                   {"name": "ReturnValue", "type": "BoolProperty", "flags": "CPF_Parm | CPF_OutParm | CPF_ReturnParm"}]}
+ }}]])
+    f:close()
+    print("[JMapGenerator] Dump complete: 2 objects\n")
+end

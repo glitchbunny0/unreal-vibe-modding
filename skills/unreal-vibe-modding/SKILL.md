@@ -19,6 +19,8 @@ crash ends it, and so does a frozen game. Work in small steps, and verify each o
 3. Check the hot reload line. If it says unsafe and you will hook Blueprint functions, ask the player to set
    `EnableHotReloadSystem = 0`.
 4. `inspect` `world` shows where the player is (map, controller, pawn); explore with `inspect` before writing Lua.
+5. If `api` `info` says there is no index for this game build, build one (`uvmod index`, about 20 s). Look names and
+   signatures up with `api` first: it covers everything the game had loaded and touches nothing.
 
 ## Rules that keep the game alive
 
@@ -70,6 +72,7 @@ These freeze the game, or make it misbehave later:
 
 ## Building the mod
 
+- Run `api` `check` on the mod before every push: it finds the FName mistakes that would crash the game.
 - Keep the probe code and the mod apart. Probe with `lua`; write the mod as files, `push` it, and restart the game to
   load it (or `swap` a hot-swap shell).
 - Change one thing at a time, and after each change verify it with a measurement, a log line or a screenshot.

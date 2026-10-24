@@ -18,6 +18,7 @@ KEYS = {
     "UVMOD_SHOTS": "screenshot folder (default: <LocalAppData>/<Project>/Saved/Screenshots/Windows)",
     "UVMOD_APPID": "the game's Steam app id, for `launch` (default: read from the Steam library the game is in)",
     "UVMOD_LAUNCH": "a command that starts the game, for `launch` instead of Steam (run on the game's machine)",
+    "UVMOD_INDEX": "the reflection index `api` and `check` read (default: the newest one built for this game)",
     "UVMOD_JOURNAL": "where uvmod records the requests it sends, for `crash` (default: ~/.local/state/uvmod/journal.jsonl; off: none)",
 }
 
@@ -65,6 +66,7 @@ class Settings:
     appid: str = ""
     launch: str = ""
     journal: str = ""
+    index: str = ""
 
     @classmethod
     def load(cls, overrides: dict[str, str] | None = None) -> "Settings":
@@ -96,4 +98,5 @@ class Settings:
             appid=values.get("UVMOD_APPID", ""),
             launch=values.get("UVMOD_LAUNCH", ""),
             journal=values.get("UVMOD_JOURNAL", ""),
+            index=values.get("UVMOD_INDEX", ""),
         )

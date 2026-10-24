@@ -358,8 +358,47 @@ $r | ConvertTo-Json -Compress -Depth 5
         out = self.powershell(f"[Convert]::ToBase64String([IO.File]::ReadAllBytes({psq(path)}))", timeout=60).strip()
         return base64.b64decode(out).decode("utf-8", errors="replace")
 
+    def files(self, pattern: str) -> list[dict]:
+        folder, _, leaf = pattern.replace("/", "\\").rpartition("\\")
+        script = f"""
+$d = if ({psq(folder)}) {{ Join-Path $u {psq(folder)} }} else {{ $u }}
+@(Get-ChildItem -File -Filter {psq(leaf or '*')} $d -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending |
+  ForEach-Object {{ [ordered]@{{ path = $_.FullName.Replace('\\','/'); time = [DateTimeOffset]::new($_.LastWriteTimeUtc).ToUnixTimeSeconds(); size = $_.Length }} }}) |
+  ConvertTo-Json -Compress -Depth 3
+"""
+        out = self.powershell(script, timeout=60).strip()
+        data = json.loads(out) if out else []
+        return data if isinstance(data, list) else [data]
+
     def fetch(self, path: str, dest: str) -> None:
         done = subprocess.run(["scp", "-q", "-o", "BatchMode=yes", f"{self.settings.host}:{path}", dest],
                               capture_output=True, timeout=120)
         if done.returncode != 0:
             raise TransportError(f"scp failed: {done.stderr.decode(errors='replace').strip()}")
+
+    def fetch_large(self, path: str, dest: str) -> None:
+        """A big file (a reflection dump): gzip it on the box with Windows' own tar, copy that, unpack it here."""
+        script = f"""
+$src = {psq(path)}
+$tgz = Join-Path $env:TEMP 'uvmod-fetch.tgz'
+Remove-Item $tgz -ErrorAction SilentlyContinue
+tar -czf $tgz -C (Split-Path $src) (Split-Path $src -Leaf) 2>&1 | Out-Null
+if (Test-Path $tgz) {{ $tgz.Replace('\\','/') }} else {{ 'ERROR: tar could not pack ' + $src }}
+"""
+        remote = self.powershell(script, timeout=900).strip()
+        if remote.startswith("ERROR: ") or not remote:
+            raise TransportError(remote[len("ERROR: "):] or "tar gave no output")
+        local_tgz = dest + ".tgz"
+        done = subprocess.run(["scp", "-q", "-o", "BatchMode=yes", f"{self.settings.host}:{remote}", local_tgz],
+                              capture_output=True, timeout=1800)
+        self.powershell(f"Remove-Item {psq(remote)} -ErrorAction SilentlyContinue", timeout=60)
+        if done.returncode != 0:
+            raise TransportError(f"scp failed: {done.stderr.decode(errors='replace').strip()}")
+        try:
+            with tarfile.open(local_tgz, "r:gz") as tar:
+                member = next(m for m in tar.getmembers() if m.isfile())
+                with tar.extractfile(member) as src, open(dest, "wb") as out:  # type: ignore[union-attr]
+                    while chunk := src.read(1 << 20):
+                        out.write(chunk)
+        finally:
+            Path(local_tgz).unlink(missing_ok=True)

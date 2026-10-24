@@ -70,6 +70,7 @@ print = function(...)
     logf:flush()
 end
 package.path = U .. "/Mods/VibeBridge/Scripts/?.lua;" .. package.path
+FAKE_UE4SS_DIR = U
 assert(loadfile((arg[0]:match("^(.*)[/\\]") or ".") .. "/fake_reflection.lua"))()
 assert(loadfile(U .. "/Mods/VibeBridge/Scripts/main.lua"))()
 

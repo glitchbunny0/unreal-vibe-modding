@@ -107,6 +107,25 @@ uvmod snap before pawn          # keeps the readable property values inside the 
 uvmod diff before               # what changed since; --update makes now the new baseline
 ```
 
+### The game's reflection, offline
+
+`uvmod index` asks the running game's UE4SS to dump its reflection (`DumpJMAP`, in UE4SS experimental build 1181 and
+newer), copies the dump here and turns it into a SQLite index under `~/.local/share/uvmod/index/`. From then on,
+questions about names and signatures need no game, cost nothing and cannot crash anything:
+
+```sh
+uvmod index                                   # once per game build; RV There Yet?: 46k objects, 20 s
+uvmod api search plank                        # classes, structs, enums, functions, properties; ranked
+uvmod api class BP_FirstPersonCharacter       # properties with their defaults, functions with signatures
+uvmod api sig Actor:K2_SetActorLocation       # parameters with roles: in, out (pass {}), ref, return
+uvmod api subclasses Pawn
+uvmod check MyMod/                            # a mod's Lua against the index
+```
+
+`check` reports, by file and line, a string or `nil` passed where a UFunction takes an `FName` (an error: UE4SS
+crashes natively on it, it is not a Lua error) and argument counts that no function of that name accepts. It exits 1
+on errors, so it fits in a test script.
+
 ### Watching what the game does
 
 To learn what happens when the player does something, watch the function, let the player act, then read what was
@@ -153,8 +172,8 @@ session, because a program started over SSH has no desktop.
 { "mcpServers": { "unreal": { "command": "uvmod", "args": ["mcp"] } } }
 ```
 
-Tools: `lua`, `mods`, `status`, `log`, `screenshot`, `inspect`, `call`, `snapshot`, `watch`, `events`, `wait`, `unwatch`,
-`push`, `swap`, `game`. Their descriptions carry the rules that crash games when broken, because that is what an agent reads.
+Tools: `lua`, `mods`, `status`, `log`, `screenshot`, `inspect`, `call`, `snapshot`, `api`, `watch`, `events`, `wait`,
+`unwatch`, `push`, `swap`, `game`. Their descriptions carry the rules that crash games when broken, because that is what an agent reads.
 
 ## Safety
 

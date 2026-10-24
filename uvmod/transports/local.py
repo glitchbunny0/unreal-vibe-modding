@@ -315,6 +315,10 @@ class LocalTransport(Transport):
     def read_text(self, path: str) -> str:
         return Path(path).read_text(encoding="utf-8", errors="replace")
 
+    def files(self, pattern: str) -> list[dict]:
+        found = sorted(self.root.glob(pattern), key=lambda p: p.stat().st_mtime, reverse=True)
+        return [{"path": str(p), "time": p.stat().st_mtime, "size": p.stat().st_size} for p in found if p.is_file()]
+
     def newest_shot(self) -> tuple[str, str] | None:
         d = self._shots_dir()
         if not d or not d.is_dir():

@@ -59,6 +59,14 @@ class Transport:
     def fetch(self, path: str, dest: str) -> None:
         raise NotImplementedError
 
+    def fetch_large(self, path: str, dest: str) -> None:
+        """Like fetch, for a file of a hundred MB or more (transports may compress it on the way)."""
+        self.fetch(path, dest)
+
+    def files(self, pattern: str) -> list[dict]:
+        """Files in the ue4ss folder matching a glob, newest first: [{"path", "time", "size"}]."""
+        raise NotImplementedError
+
     def make_folder(self, name: str) -> None:
         """Create a folder inside the ue4ss folder (the LuaRepl folder for VibeBridge)."""
         raise NotImplementedError
