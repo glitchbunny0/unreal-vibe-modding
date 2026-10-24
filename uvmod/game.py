@@ -313,6 +313,9 @@ return "ok"
         entries = journal.tail(self.settings, journal_count)
         out.append("\nlast requests uvmod sent (a request with no answer right before the crash is the first suspect):")
         out += ["  " + l for l in journal.render(entries).splitlines()]
+        if entries and st.running is False and entries[-1].get("done") in (None, "timeout", "failed"):
+            out.append("  -> the last request got no answer and the game is gone: it most likely killed the game. "
+                       "Check it (uvmod check FILE for FName mistakes) before sending anything like it again.")
         if any("ue4ss.dll+" in l.lower() for l in out):
             out.append("\nUE4SS.dll offsets symbolize with the PDB of the same build: "
                        "llvm-symbolizer --obj=UE4SS.dll --relative-address --functions=linkage --demangle 0x...")

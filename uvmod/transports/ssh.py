@@ -353,11 +353,15 @@ try {{
     def stop(self) -> str:
         script = """
 if (-not $proc) { 'ERROR: unknown game process (set UVMOD_PROCESS)'; exit 0 }
-if (-not (Get-Game)) { "$proc is not running"; exit 0 }
-Get-Process -Name $proc, CrashReportClient -ErrorAction SilentlyContinue | Stop-Process -Force
+# After a crash, Unreal's crash reporter keeps running, and while it does Steam will not start the game again.
+$reporter = @(Get-Process -Name CrashReportClient -ErrorAction SilentlyContinue)
+$reporter | Stop-Process -Force -ErrorAction SilentlyContinue
+$closed = if ($reporter.Count) { ' (closed the crash reporter)' } else { '' }
+if (-not (Get-Game)) { "$proc is not running$closed"; exit 0 }
+Get-Process -Name $proc -ErrorAction SilentlyContinue | Stop-Process -Force
 $sw = [Diagnostics.Stopwatch]::StartNew()
 while ((Get-Game) -and $sw.Elapsed.TotalSeconds -lt 10) { Start-Sleep -Milliseconds 200 }
-if (Get-Game) { "$proc is still running" } else { "stopped $proc" }
+if (Get-Game) { "$proc is still running" } else { "stopped $proc$closed" }
 """
         out = self.powershell(script, timeout=60).strip()
         if out.startswith("ERROR: "):

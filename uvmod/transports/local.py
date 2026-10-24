@@ -8,6 +8,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import time
 from datetime import datetime
@@ -129,6 +130,23 @@ class LocalTransport(Transport):
             return Path(exe).stem
         return ""
 
+    @staticmethod
+    def _linux_pids(name: str) -> list[int]:
+        """Processes whose program (argv[0], as Wine/Proton shows a Windows exe) is `name` or `name`.exe. Not
+        `pgrep -f`, which also matches any command line that merely mentions the name."""
+        want = {name.lower(), name.lower() + ".exe"}
+        pids = []
+        for entry in Path("/proc").iterdir():
+            if not entry.name.isdigit():
+                continue
+            try:
+                argv0 = (entry / "cmdline").read_bytes().split(b"\0")[0].decode("utf-8", errors="replace")
+            except OSError:
+                continue
+            if re.split(r"[\\/]", argv0)[-1].lower() in want:
+                pids.append(int(entry.name))
+        return sorted(pids)
+
     def _pid(self, process: str) -> int | None:
         if not process:
             return None
@@ -138,8 +156,8 @@ class LocalTransport(Transport):
                                      capture_output=True, text=True, timeout=10).stdout
                 m = re.search(r'^"[^"]+","(\d+)"', out, re.M)
                 return int(m.group(1)) if m else None
-            out = subprocess.run(["pgrep", "-o", "-f", "--", process], capture_output=True, text=True, timeout=10).stdout
-            return int(out.split()[0]) if out.split() else None
+            pids = self._linux_pids(process)
+            return pids[0] if pids else None
         except (OSError, subprocess.SubprocessError, ValueError):
             return None
 
@@ -286,13 +304,25 @@ class LocalTransport(Transport):
         process = self._process()
         if not process:
             raise TransportError("unknown game process (set UVMOD_PROCESS)")
+        # After a crash, Unreal's crash reporter keeps running, and while it does Steam will not start the game again.
+        if os.name == "nt":
+            subprocess.run(["taskkill", "/IM", "CrashReportClient.exe", "/F"], capture_output=True, timeout=30)
+        else:
+            for pid in self._linux_pids("CrashReportClient"):
+                try:
+                    os.kill(pid, signal.SIGKILL)
+                except OSError:
+                    pass
         if self._pid(process) is None:
             return f"{process} is not running"
         if os.name == "nt":
             subprocess.run(["taskkill", "/IM", f"{process}.exe", "/F"], capture_output=True, timeout=30)
-            subprocess.run(["taskkill", "/IM", "CrashReportClient.exe", "/F"], capture_output=True, timeout=30)
         else:
-            subprocess.run(["pkill", "-f", "--", process], capture_output=True, timeout=30)
+            for pid in self._linux_pids(process):
+                try:
+                    os.kill(pid, signal.SIGTERM)
+                except OSError:
+                    pass
         for _ in range(50):
             if self._pid(process) is None:
                 return f"stopped {process}"
