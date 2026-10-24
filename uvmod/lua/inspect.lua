@@ -48,6 +48,8 @@ do
             UInt64Property = "uint64", FloatProperty = "float", DoubleProperty = "double", NameProperty = "FName",
             StrProperty = "FString", TextProperty = "FText",
         }
+        local OBJECT_TYPES = { UObject = true, AActor = true, UClass = true, UFunction = true, UWorld = true,
+            UDataTable = true, UEnum = true, UInterface = true }
         local OBJECT_PROPS = { ObjectProperty = true, ClassProperty = true, WeakObjectProperty = true,
             SoftObjectProperty = true, SoftClassProperty = true, LazyObjectProperty = true, InterfaceProperty = true }
         -- Blueprint functions list their locals after their parameters; the compiler's own locals start like this.
@@ -174,8 +176,15 @@ do
                 for i = 1, math.min(n, 8) do parts[i] = show(try(function() return v[i] end), depth - 1) end
                 return "TArray n=" .. n .. " [" .. table.concat(parts, ", ") .. (n > 8 and ", ..." or "") .. "]"
             end
-            -- A struct: read the fields common structs have, before asking for a name (a struct wrapper answers
-            -- GetFullName with its struct TYPE).
+            -- An object: validity, then its name, and nothing else. Probing fields on an object, above all an invalid
+            -- one, is what made one null ObjectProperty read take seconds under VibeBridge (UE4SS 83330635).
+            if OBJECT_TYPES[ut] then
+                local valid = try(function() return v:IsValid() end)
+                if valid ~= true then return "(invalid " .. ut .. ")" end
+                return try(function() return v:GetFullName() end) or ut
+            end
+            -- A struct (and anything else): read the fields common structs have, before asking for a name (a struct
+            -- wrapper answers GetFullName with its struct TYPE).
             local function field(k) return try(function() return v[k] end) end
             local tr = field("Translation")
             if tr ~= nil and field("Scale3D") ~= nil then
@@ -357,11 +366,20 @@ do
         end
         I.read = read
 
+        -- Collect inside UE4SS's ForEach* callbacks, work outside them: reading values inside the callback cost
+        -- orders of magnitude more under VibeBridge's instruction budget (a 126-property class blew a 2 s budget;
+        -- the same reads after collecting took no time). Measured on RV There Yet?, UE4SS 83330635.
+        local function collect(cls, method)
+            local items = {}
+            pcall(function() cls[method](cls, function(x) items[#items + 1] = x end) end)
+            return items
+        end
+
         local function each_property(obj, super, f)
             for i, cls in ipairs(class_chain(obj)) do
                 if i > 1 and not super then break end
                 local owner = fname(cls) or "?"
-                pcall(function() cls:ForEachProperty(function(p) return f(owner, p) end) end)
+                for _, p in ipairs(collect(cls, "ForEachProperty")) do f(owner, p) end
             end
         end
 
@@ -401,19 +419,20 @@ do
         -- value is recognised by its name, Blueprint locals are cut at the first compiler-generated name, and an out
         -- parameter cannot be told from an in parameter (the reflection index can: `uvmod api`).
         local function params_of(f)
-            local params, done = {}, false
-            local ok, err = pcall(function()
-                f:ForEachProperty(function(p)
-                    if done then return end
-                    local name = fname(p) or "?"
-                    for _, pre in ipairs(LOCAL_PREFIXES) do
-                        if name:sub(1, #pre) == pre then done = true return end
-                    end
-                    local t, k = ptype(p)
-                    params[#params + 1] = { name = name, type = t, class = k, ret = name == "ReturnValue" }
-                end)
-            end)
+            local props = {}
+            local ok, err = pcall(function() f:ForEachProperty(function(p) props[#props + 1] = p end) end)
             if not ok then return nil, tostring(err) end
+            local params = {}
+            for _, p in ipairs(props) do
+                local name = fname(p) or "?"
+                local is_local = false
+                for _, pre in ipairs(LOCAL_PREFIXES) do
+                    if name:sub(1, #pre) == pre then is_local = true break end
+                end
+                if is_local then break end
+                local t, k = ptype(p)
+                params[#params + 1] = { name = name, type = t, class = k, ret = name == "ReturnValue" }
+            end
             return params
         end
         I.params_of = params_of
@@ -437,13 +456,9 @@ do
                 return nil
             end
             for _, cls in ipairs(class_chain(obj)) do
-                local found
-                pcall(function()
-                    cls:ForEachFunction(function(f)
-                        if not found and fname(f) == name then found = f end
-                    end)
-                end)
-                if found then return found, fname(cls) end
+                for _, f in ipairs(collect(cls, "ForEachFunction")) do
+                    if fname(f) == name then return f, fname(cls) end
+                end
             end
         end
 
@@ -455,20 +470,17 @@ do
             for i, cls in ipairs(class_chain(obj)) do
                 if i > 1 and super == false then break end
                 local owner = fname(cls) or "?"
-                pcall(function()
-                    cls:ForEachFunction(function(f)
-                        local name = fname(f)
-                        if name and not seen[name] and match(name) then
-                            seen[name] = true
-                            total = total + 1
-                            if total <= limit then
-                                local params = params_of(f)
-                                lines[#lines + 1] = line("F", owner, name, flags_text(f),
-                                    params and signature_text(params) or "(?)")
-                            end
+                for _, f in ipairs(collect(cls, "ForEachFunction")) do
+                    local name = fname(f)
+                    if name and not seen[name] and match(name) then
+                        seen[name] = true
+                        total = total + 1
+                        if total <= limit then
+                            local params = params_of(f)
+                            lines[#lines + 1] = line("F", owner, name, flags_text(f), params and signature_text(params) or "(?)")
                         end
-                    end)
-                end)
+                    end
+                end
             end
             if total > limit then lines[#lines + 1] = line("N", total, limit) end
             return pack(lines)
