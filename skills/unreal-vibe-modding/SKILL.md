@@ -63,7 +63,8 @@ These freeze the game, or make it misbehave later:
   does the same for a value.
 - **Look at the game yourself.** Use `screenshot` instead of asking the player to describe the screen; for motion,
   `burst` returns several frames on one sheet (the engine writes about one screenshot per 0.7 s at 1440p, so it
-  cannot show anything faster).
+  cannot show anything faster). Screenshots include the game's UI (HUD, menus) as the player sees it: the engine's
+  plain `shot` command leaves all of it out, which hides menus and on-screen messages (UE 5.6).
 - **Play it yourself.** `input` presses or holds the game's own InputActions (IA_Jump, IA_Look with an X,Y value), so
   you can trigger the action you are studying and test a mod's controls without the player. Check that it did
   something (watch the `InpActEvt_<Action>_...` functions, snapshot, screenshot): an action only works where the

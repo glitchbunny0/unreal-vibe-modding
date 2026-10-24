@@ -73,6 +73,13 @@ class ProtocolTests(unittest.TestCase):
         with self.assertRaises(protocol.ProtocolError):
             protocol.parse_answer("not json")
 
+    def test_screenshots_keep_the_ui(self):
+        # `shot` alone leaves the HUD, menus and the overlay out; the player sees them.
+        from uvmod.game import screenshot_lua
+
+        self.assertIn('ExecuteConsoleCommand(pc, "shot showui", pc)', screenshot_lua())
+        self.assertIn('ExecuteConsoleCommand(pc, "shot", pc)', screenshot_lua(ui=False))
+
 
 class SettingsTests(unittest.TestCase):
     def test_file_env_and_inference(self):

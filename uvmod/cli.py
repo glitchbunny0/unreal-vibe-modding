@@ -30,9 +30,10 @@ HELP = f"""uvmod {__version__} — vibe modding for Unreal Engine games: run Lua
   uvmod follow [REGEX]                      stream the log until Ctrl+C
   uvmod push DIR                            copy a mod folder into Mods/ (loads at the next game start)
   uvmod swap DIR                            push a hot-swap-shell mod and swap its logic in place
-  uvmod shot [OUT.jpg] [--burst N [--every MS]]   engine screenshot, copied here; --burst: N shots MS apart (default
-        750), timed in the game and tiled into one numbered contact sheet, to judge motion. The engine writes one
-        screenshot at a time (about 0.7 s each at 1440p) and drops requests meanwhile, so shorter steps lose frames
+  uvmod shot [OUT.jpg] [--burst N [--every MS]] [--no-ui]   engine screenshot as the player sees it (HUD, menus, the
+        overlay), copied here; --no-ui: the scene only. --burst: N shots MS apart (default 750), timed in the game and
+        tiled into one numbered contact sheet, to judge motion. The engine writes one screenshot at a time (about
+        0.7 s each at 1440p) and drops requests meanwhile, so shorter steps lose frames
 
   uvmod watch FUNCTION [--capture EXPR]     record each call of a UFunction, in the game, until unwatched
         e.g. uvmod watch /Script/Engine.PlayerController:ClientRestart
@@ -343,6 +344,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--mod")
     p.add_argument("--burst", type=int, default=0)
     p.add_argument("--every", type=int, default=750)
+    p.add_argument("--no-ui", action="store_true")
     p = sub.add_parser("watch")
     p.add_argument("function")
     p.add_argument("--id")
@@ -490,11 +492,11 @@ def main(argv: list[str] | None = None) -> int:
             return EXIT_OK if ok else EXIT_LUA_ERROR
         if args.cmd == "shot":
             if args.burst:
-                path = game.burst(args.burst, args.every, args.out, args.mod)
+                path = game.burst(args.burst, args.every, args.out, args.mod, ui=not args.no_ui)
                 got, asked = game.last_burst
                 print(f"{path} ({got} of {asked} frames" + ("; the engine drops shots requested while it still writes one" if got < asked else "") + ")")
             else:
-                print(game.screenshot(args.out, args.mod))
+                print(game.screenshot(args.out, args.mod, ui=not args.no_ui))
             return EXIT_OK
         if args.cmd in ("watch", "unwatch", "events", "wait", "watches"):
             return cmd_watch(Watcher(game, args.mod), args)

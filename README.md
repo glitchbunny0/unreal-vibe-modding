@@ -64,7 +64,7 @@ uvmod lua '1 + 1'                  # => 2 / OK
 uvmod lua 'return FindFirstOf("PlayerController"):GetFullName()'
 uvmod run probe.lua                # a file, or - for stdin
 uvmod log 50 'error|warning'       # UE4SS.log, filtered
-uvmod shot                         # a screenshot of what the player sees
+uvmod shot                         # a screenshot of what the player sees, HUD and menus included (--no-ui: without)
 uvmod shot --burst 6               # six, 750 ms apart, tiled into one numbered contact sheet (motion, animation)
 uvmod notes add 'IsHolding flips on drop, not on pickup'   # this game's notes, read at the next session's start
 uvmod push MyMod                   # copy a mod folder into Mods/ (loads at the next game start)

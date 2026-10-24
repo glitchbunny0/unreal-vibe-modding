@@ -65,12 +65,13 @@ TOOLS: list[dict[str, Any]] = [
     },
     {
         "name": "screenshot",
-        "description": ("Takes an engine screenshot of the game as the player sees it and returns the image. Look at the game "
+        "description": ("Takes an engine screenshot of the game as the player sees it, with its UI (HUD, menus, the "
+                        "overlay; `ui` false: the scene only), and returns the image. Look at the game "
                         "yourself instead of asking the player to describe it. With `burst` (2-16), takes that many shots "
                         "`every_ms` apart (default 750, timed inside the game) and returns them tiled into one numbered contact "
                         "sheet: for motion and animation, which one frame cannot show. The engine writes one screenshot at a "
                         "time (about 0.7 s each at 1440p) and drops requests meanwhile, so shorter steps return fewer frames."),
-        "inputSchema": {"type": "object", "properties": {"mod": {"type": "string"},
+        "inputSchema": {"type": "object", "properties": {"mod": {"type": "string"}, "ui": {"type": "boolean"},
                                                          "burst": {"type": "integer", "minimum": 2, "maximum": 16},
                                                          "every_ms": {"type": "integer", "minimum": 50, "maximum": 5000}}},
     },
@@ -380,14 +381,15 @@ class Server:
             lines = game.log(int(args.get("lines") or 40), str(args.get("pattern") or ""))
             return text("\n".join(lines) or "(no matching lines)")
         if name == "screenshot":
+            ui = args.get("ui") is not False
             if args.get("burst"):
-                path = game.burst(int(args["burst"]), int(args.get("every_ms") or 750), mod=args.get("mod") or None)
+                path = game.burst(int(args["burst"]), int(args.get("every_ms") or 750), mod=args.get("mod") or None, ui=ui)
                 if os.path.isdir(path):
                     return text(f"no ffmpeg here to tile them; the frames are in {path}")
                 got, asked = game.last_burst
                 note = f"{got} of {asked} frames, numbered in order"
             else:
-                path = game.screenshot(mod=args.get("mod") or None)
+                path = game.screenshot(mod=args.get("mod") or None, ui=ui)
                 note = ""
             with open(path, "rb") as f:
                 data = base64.b64encode(f.read()).decode("ascii")

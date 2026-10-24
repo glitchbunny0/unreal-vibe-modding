@@ -18,11 +18,13 @@ from .transports import Status, Transport, make
 # logging writes for every call), VibeBridge, hot-swap shells. Valid in Python and .NET regular expressions.
 STATUS_PATTERN = r"UE4SS - v|\[ExternalLuaRepl\] (?!Request )|\[VibeBridge\]|loaded WITHOUT logic|swapped logic|swap REFUSED"
 
-SCREENSHOT_LUA = (
-    'local pc = FindFirstOf("PlayerController") '
-    'StaticFindObject("/Script/Engine.Default__KismetSystemLibrary"):ExecuteConsoleCommand(pc, "shot", pc) '
-    'return "ok"'
-)
+def screenshot_lua(ui: bool = True) -> str:
+    """Lua that asks the engine for one screenshot. `shot` alone leaves every UI out (HUD, menus, an overlay);
+    `shot showui` keeps it, which is what the player sees."""
+    command = "shot showui" if ui else "shot"
+    return ('local pc = FindFirstOf("PlayerController") '
+            f'StaticFindObject("/Script/Engine.Default__KismetSystemLibrary"):ExecuteConsoleCommand(pc, "{command}", pc) '
+            'return "ok"')
 
 
 class GameError(Exception):
@@ -121,10 +123,11 @@ class Game:
                            "game once to load it), or the game thread is stuck.")
         return answer.startswith("OK"), answer.strip()
 
-    def screenshot(self, out: str | None = None, mod: str | None = None) -> str:
-        """Take an engine screenshot ("shot"), copy it here, scale it to 1280 px wide if ffmpeg exists. Returns the path."""
+    def screenshot(self, out: str | None = None, mod: str | None = None, ui: bool = True) -> str:
+        """Take an engine screenshot, with the game's UI unless `ui` is false, copy it here, scale it to 1280 px wide if
+        ffmpeg exists. Returns the path."""
         before = self.transport.newest_shot()
-        result = self.exec(SCREENSHOT_LUA, mod)
+        result = self.exec(screenshot_lua(ui), mod)
         if not result.ok:
             raise GameError(protocol.render_text(result.answer) if result.answer else timeout_message(result.delivery, self.settings.timeout))
         now = None
@@ -160,7 +163,8 @@ class Game:
             raise GameError(protocol.render_text(result.answer) if result.answer else timeout_message(result.delivery, self.settings.timeout))
         return f"ran: {command}"
 
-    def burst(self, count: int = 6, every_ms: int = 200, out: str | None = None, mod: str | None = None) -> str:
+    def burst(self, count: int = 6, every_ms: int = 200, out: str | None = None, mod: str | None = None,
+              ui: bool = True) -> str:
         """`count` engine screenshots `every_ms` apart, scheduled inside the game (so the timing is the game's, not the
         transport's), copied here and tiled into one contact sheet. Returns its path (or a folder of PNGs without
         ffmpeg)."""
@@ -170,7 +174,7 @@ class Game:
         lua = f"""
 local pc = FindFirstOf("PlayerController")
 local ksl = StaticFindObject("/Script/Engine.Default__KismetSystemLibrary")
-local function shot() if pc:IsValid() then ksl:ExecuteConsoleCommand(pc, "shot", pc) end end
+local function shot() if pc:IsValid() then ksl:ExecuteConsoleCommand(pc, "{'shot showui' if ui else 'shot'}", pc) end end
 shot()
 if type(ExecuteInGameThreadWithDelay) == "function" then
   for i = 1, {count - 1} do ExecuteInGameThreadWithDelay(i * {every_ms}, shot) end
