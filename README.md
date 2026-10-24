@@ -70,7 +70,28 @@ uvmod swap MyMod                   # hot-swap a mod built as a hot-swap shell, n
 ```
 
 `lua`, `run` and `mods` take `--mod NAME`, `--limit MS` and `--json`. Exit codes: 0 OK, 1 the Lua raised an error,
-2 usage or settings, 3 nothing answered.
+2 usage or settings, 3 nothing answered, 4 `wait` timed out.
+
+### Watching what the game does
+
+To learn what happens when the player does something, watch the function, let the player act, then read what was
+recorded. The recording happens inside the game, in a bounded buffer, so nothing is lost between calls and the log
+stays clean:
+
+```sh
+uvmod watch /Game/Blueprints/BP_Door.BP_Door_C:OpenDoor --capture 'self.bIsOpen, select(1, ...)'
+uvmod wait --for OpenDoor          # blocks until it is called (default 30 s); exit 4 if not
+uvmod events                       # everything recorded since the last events/wait, runs collapsed
+uvmod wait --until 'FindFirstOf("BP_Door_C").bIsOpen' --timeout 60
+uvmod unwatch                      # remove every watch
+```
+
+`--capture` is a Lua expression over `self` and the function's parameters (`...`, already read); its value is
+recorded, and `nil` skips the call. A watch records at most `--limit` calls (default 200) and keeps counting after
+that. The capture runs inside the game on every call, without a time limit, so keep it short.
+
+`--post` records after the call instead. UE4SS runs post callbacks for native functions only, so `watch` refuses
+`--post` on a Blueprint function. In a post capture, `...` starts with the function's return value, if it has one.
 
 ### As an MCP server
 
@@ -78,7 +99,7 @@ uvmod swap MyMod                   # hot-swap a mod built as a hot-swap shell, n
 { "mcpServers": { "unreal": { "command": "uvmod", "args": ["mcp"] } } }
 ```
 
-Tools: `lua`, `mods`, `status`, `log`, `screenshot`, `push`, `swap`. Their descriptions carry the rules that crash games
+Tools: `lua`, `mods`, `status`, `log`, `screenshot`, `watch`, `events`, `wait`, `unwatch`, `push`, `swap`. Their descriptions carry the rules that crash games
 when broken, because that is what an agent reads.
 
 ## Safety

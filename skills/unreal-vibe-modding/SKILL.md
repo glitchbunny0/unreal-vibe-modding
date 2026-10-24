@@ -34,14 +34,21 @@ These freeze the game, or make it misbehave later:
 
 - **Endless loops.** Requests stop after their limit (250 ms by default, `--limit` up to 5000). One long native call
   is not interrupted, and VibeBridge's limit is coarser, so keep loops bounded anyway.
-- **Hooks are permanent until the mod restarts.** Register a hook once, keep its ids in a global, and do not register
-  it again in every request. A hook callback that errors on every call floods the log.
+- **Hooks are permanent until the mod restarts.** Probe with `watch`, which keeps track of its hooks and records
+  into a bounded buffer; `unwatch` when done. A hook you register yourself with `RegisterHook` stays until the mod
+  restarts: register it once and keep its ids in a global. A hook callback that errors on every call floods the log.
+- **Post hooks on Blueprint functions never run.** UE4SS keeps only the pre callback of a Blueprint function's
+  hook (`RegisterHook` then returns the same id twice); `watch --post` refuses them. Read the effect of a Blueprint
+  call another way: a pre watch on whatever it calls next, or `wait --until` on the value. In a native post hook,
+  the parameters after `self` start with the return value. Both checked on UE4SS 3.0.1, UE 5.6.
+- **Captures run on every call.** A `watch` capture has no time limit and runs inside the game each time the
+  function is called. Keep it to reading a few values; watching a per-frame function stops recording at its limit.
 
 ## How to find out what the game does
 
 - **A name is a guess.** A property called `IsHolding` can flip when an object is dropped, not when it is picked up.
-  Measure it: sample the value around the player's action, or hook the function and log when it fires, before you
-  build on it.
+  Measure it before you build on it: `watch` the function with a `capture` of the values you care about, tell the
+  player what to do, then `wait` for it and read the events. `wait` with `until` does the same for a value.
 - **Look at the game yourself.** Use `screenshot` instead of asking the player to describe the screen.
 - **Read the log after every change.** `log 50 'error|warning'` shows what your code caused.
 - **Prefer the game's own functions over writing properties.** Calling the function keeps the game's own logic,
