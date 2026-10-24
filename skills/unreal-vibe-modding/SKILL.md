@@ -79,6 +79,9 @@ These freeze the game, or make it misbehave later:
 
 ## Building the mod
 
+- Start a new mod with `uvmod new NAME` (a hot-swap shell, its logic, tests against a strict UE4SS stand-in) and
+  load changes with `swap`, not UE4SS's hot reload. After the mod calls new UFunctions, `uvmod mock` refreshes the
+  signatures its tests enforce.
 - Run `api` `check` on the mod before every push: it finds the FName mistakes that would crash the game.
 - Keep the probe code and the mod apart. Probe with `lua`; write the mod as files, `push` it, and restart the game to
   load it (or `swap` a hot-swap shell).

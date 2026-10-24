@@ -221,6 +221,9 @@ class Index:
         self.path = Path(path)
         self.db = sqlite3.connect(f"file:{self.path}?mode=ro", uri=True)
 
+    def close(self) -> None:
+        self.db.close()
+
     def meta(self) -> dict[str, str]:
         return dict(self.db.execute("SELECT key, value FROM meta"))
 

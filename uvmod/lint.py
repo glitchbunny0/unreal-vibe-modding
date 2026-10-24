@@ -121,7 +121,7 @@ def check_source(index: Index, src: str, filename: str = "<lua>") -> list[Findin
     cache: dict[str, list[tuple[str, list]]] = {}
     for m in CALL.finditer(masked):
         name = m.group(1)
-        if name in UE4SS_METHODS:
+        if name in UE4SS_METHODS or name.islower():  # UFunctions are PascalCase; f:close(), s:find() are Lua's
             continue
         if name not in cache:
             cache[name] = [(path, [p for p in index.params(path) if p.role != "ret"]) for path, _ in index.functions_named(name)]

@@ -184,6 +184,21 @@ that. The capture runs inside the game on every call, without a time limit, so k
 `--post` records after the call instead. UE4SS runs post callbacks for native functions only, so `watch` refuses
 `--post` on a Blueprint function. In a post capture, `...` starts with the function's return value, if it has one.
 
+### Starting a new mod
+
+```sh
+uvmod new MyMod            # a project folder: the mod, its tests, a README with the loop and a test plan
+MyMod/tests/run.sh         # syntax, uvmod check, tests: all without the game
+uvmod push MyMod/MyMod && uvmod restart
+uvmod swap MyMod/MyMod     # after each change to logic.lua: loaded into the running game, no restart
+```
+
+The mod is a hot-swap shell (`Scripts/main.lua`, which registers keys and hooks once and never tears down) and its
+logic (`Scripts/logic.lua`), which `swap` reloads in place; UE4SS's own hot reload can crash a game once a mod hooks
+Blueprint functions. The tests run the mod against `tests/ue4ss.lua`, a strict stand-in for UE4SS that crashes like
+the game when an `FName` parameter gets a string. `uvmod mock` writes `tests/game_api.lua` with the real signatures of
+the UFunctions the mod calls, from the reflection index, and the stand-in enforces them.
+
 ### Starting the game, and when it dies
 
 ```sh

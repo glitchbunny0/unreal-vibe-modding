@@ -325,14 +325,17 @@ class Server:
             from .lint import check_paths
 
             ix = open_index()
-            action = str(args.get("action") or "")
-            if action == "check":
-                findings = check_paths(ix, [str(args.get("path") or "")])
-                errors = sum(1 for f in findings if f.severity == "error")
-                body = "\n".join(str(f) for f in findings) or "no findings"
-                return text(f"{body}\n{errors} errors, {len(findings) - errors} warnings {ix.header()}", errors > 0)
-            return text(api_answer(ix, action, str(args.get("text") or ""), str(args.get("kind") or ""),
-                                   int(args.get("limit") or 40), bool(args.get("inherited"))))
+            try:
+                action = str(args.get("action") or "")
+                if action == "check":
+                    findings = check_paths(ix, [str(args.get("path") or "")])
+                    errors = sum(1 for f in findings if f.severity == "error")
+                    body = "\n".join(str(f) for f in findings) or "no findings"
+                    return text(f"{body}\n{errors} errors, {len(findings) - errors} warnings {ix.header()}", errors > 0)
+                return text(api_answer(ix, action, str(args.get("text") or ""), str(args.get("kind") or ""),
+                                       int(args.get("limit") or 40), bool(args.get("inherited"))))
+            finally:
+                ix.close()
         game = self._game()
         if name in ("lua", "mods"):
             if name == "lua":

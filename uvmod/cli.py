@@ -81,6 +81,12 @@ The game's reflection, offline (an index built from UE4SS's own dump; no game ne
   uvmod check PATH ...                      read a mod's Lua against the index: a string or nil where a UFunction
         takes an FName is a native crash (error, exit 1); argument counts no function accepts (warning)
 
+A new mod
+  uvmod new NAME [--dir DIR]                a mod project: hot-swap shell, logic.lua, tests against a strict UE4SS
+        stand-in (crashes like the game on an FName mistake), tests/run.sh, a README with the loop and a test plan
+  uvmod mock [PROJECT]                      write PROJECT/tests/game_api.lua: the real signatures of the UFunctions the
+        mod calls, from the reflection index, which the stand-in then enforces (default PROJECT: .)
+
 The game itself
   uvmod launch | uvmod stop                 start the game (Steam, or UVMOD_LAUNCH) / end its process
   uvmod restart [--timeout S]               stop, launch, and wait until a REPL answers (load new mod builds)
@@ -251,23 +257,49 @@ def api_answer(ix, action: str, what: str, kind: str = "", limit: int = 40, inhe
 
 
 def cmd_offline(args) -> int:
+    from . import scaffold
     from .lint import check_paths
 
     try:
-        ix = open_index()
-        if args.cmd == "api":
-            print(api_answer(ix, args.action, args.what, args.kind, args.limit, args.inherited))
+        if args.cmd == "new":
+            target = scaffold.new(args.name, args.dir)
+            print(f"made {target}")
+            try:
+                ix = open_index()
+                try:
+                    out, written, unknown = scaffold.mock(str(target), ix)
+                finally:
+                    ix.close()
+                print(f"wrote {out} ({written} functions from the reflection index)")
+            except ConfigError:
+                print("(no reflection index yet: run `uvmod index` with the game running, then `uvmod mock`)")
+            print(f"next: {target}/tests/run.sh, then uvmod push {target / args.name} and uvmod restart")
             return EXIT_OK
-        findings = check_paths(ix, args.paths)
-        for f in findings:
-            print(f)
-        errors = sum(1 for f in findings if f.severity == "error")
-        print(f"{errors} error{'s' if errors != 1 else ''}, {len(findings) - errors} warning{'s' if len(findings) - errors != 1 else ''} "
-              + ix.header())
-        return EXIT_LUA_ERROR if errors else EXIT_OK
+        ix = open_index()
+        try:
+            return offline_with(ix, args, scaffold, check_paths)
+        finally:
+            ix.close()
     except (ConfigError, ValueError, OSError) as e:
         print(f"uvmod: {e}", file=sys.stderr)
         return EXIT_USAGE
+
+
+def offline_with(ix, args, scaffold, check_paths) -> int:
+    if args.cmd == "mock":
+        out, written, unknown = scaffold.mock(args.project, ix)
+        print(f"wrote {out}: {written} functions" + (f"; not in the index (Lua or UE4SS functions?): {', '.join(unknown)}" if unknown else ""))
+        return EXIT_OK
+    if args.cmd == "api":
+        print(api_answer(ix, args.action, args.what, args.kind, args.limit, args.inherited))
+        return EXIT_OK
+    findings = check_paths(ix, args.paths)
+    for f in findings:
+        print(f)
+    errors = sum(1 for f in findings if f.severity == "error")
+    warnings = len(findings) - errors
+    print(f"{errors} error{'s' if errors != 1 else ''}, {warnings} warning{'s' if warnings != 1 else ''} {ix.header()}")
+    return EXIT_LUA_ERROR if errors else EXIT_OK
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -388,6 +420,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--limit", type=int, default=40)
     p.add_argument("--inherited", action="store_true")
     sub.add_parser("check").add_argument("paths", nargs="+")
+    p = sub.add_parser("new")
+    p.add_argument("name")
+    p.add_argument("--dir", default=".")
+    sub.add_parser("mock").add_argument("project", nargs="?", default=".")
     sub.add_parser("launch")
     sub.add_parser("stop")
     for name in ("ready", "restart"):
@@ -407,7 +443,7 @@ def main(argv: list[str] | None = None) -> int:
         from .mcp import serve
 
         return serve()
-    if args.cmd in ("api", "check"):
+    if args.cmd in ("api", "check", "new", "mock"):
         return cmd_offline(args)
 
     try:

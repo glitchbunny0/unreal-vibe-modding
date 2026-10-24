@@ -183,6 +183,58 @@ p:IsValid()
             os.environ.update(saved)
 
 
+class ScaffoldTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.ix = index.Index(make_index(self.tmp.name))
+
+    def tearDown(self):
+        self.ix.db.close()
+        self.tmp.cleanup()
+
+    def test_new_and_mock(self):
+        from uvmod import scaffold
+
+        target = scaffold.new("MyMod", self.tmp.name)
+        for rel in ("MyMod/Scripts/main.lua", "MyMod/Scripts/logic.lua", "MyMod/enabled.txt", "tests/ue4ss.lua",
+                    "tests/test_mod.lua", "tests/run.sh", "tests/game_api.lua", "README.md", ".gitignore"):
+            self.assertTrue((target / rel).exists(), rel)
+        self.assertNotIn("{{NAME}}", (target / "MyMod/Scripts/main.lua").read_text())
+        self.assertIn('local NAME = "MyMod"', (target / "MyMod/Scripts/main.lua").read_text())
+        self.assertTrue(os.access(target / "tests/run.sh", os.X_OK))
+        with self.assertRaises(ValueError):
+            scaffold.new("MyMod", self.tmp.name)
+        with self.assertRaises(ValueError):
+            scaffold.new("1bad", self.tmp.name)
+        out, written, unknown = scaffold.mock(str(target), self.ix)
+        self.assertEqual(written, 0, "the example calls nothing this small index has")
+        self.assertIn("IsLocalController", unknown)
+        self.assertNotIn("close", unknown, "Lua's own lowercase methods are not UFunctions")
+        if not HAVE_LUA:
+            return
+        import subprocess
+
+        from test_bridge_e2e import LUA
+
+        run = lambda: subprocess.run([LUA, "tests/test_mod.lua"], cwd=target, capture_output=True, text=True)
+        done = run()
+        self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+        self.assertIn("5 passed, 0 failed", done.stdout)
+        # The stand-in enforces the real signature once `mock` has written it: a string for an FName crashes.
+        logic = target / "MyMod/Scripts/logic.lua"
+        logic.write_text(logic.read_text().replace("local loc = pawn:K2_GetActorLocation()",
+                                                   'pawn:ActorHasTag("Player")\n        local loc = pawn:K2_GetActorLocation()'))
+        test = target / "tests/test_mod.lua"
+        test.write_text(test.read_text().replace("methods = { K2_GetActorLocation", "methods = { ActorHasTag = function() return true end, K2_GetActorLocation"))
+        out, written, unknown = scaffold.mock(str(target), self.ix)
+        self.assertEqual(written, 1)
+        self.assertIn('ActorHasTag = {', out.read_text())
+        done = run()
+        self.assertNotEqual(done.returncode, 0)
+        self.assertIn("NATIVE CRASH", done.stdout + done.stderr)
+        self.assertIn("ActorHasTag argument 1 (Tag) is an FName, got string", done.stdout + done.stderr)
+
+
 @unittest.skipUnless(HAVE_LUA, "needs Lua 5.4 (set LUA=/path/to/lua)")
 class IndexEndToEnd(BridgeHarness, unittest.TestCase):
     def test_index_from_the_running_game(self):
