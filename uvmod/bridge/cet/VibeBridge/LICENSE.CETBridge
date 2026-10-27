@@ -1,7 +1,8 @@
 handlers.lua and serializer.lua in this folder are CETBridge's game handlers and value serializer, copied unmodified
 from Guikingone/WkMCP (live-bridge/CETBridge, commit 6f6be2fb74f3c4786fc49c205af4104e32ae27c2), which took them from
 Y4rd13/cyber-engine-tweak-mcp (cet-mod/CETBridge, commit 4893237b5d181c7d1e0bd8638035a56b1bf607fc) and fixed set_stat,
-spawn_vehicle, added unobserve_events and probe. Both are MIT licensed:
+spawn_vehicle, added unobserve_events and probe. cetbridge_fixes.lua replaces handlers that fail on Cyberpunk 2077
+2.5 (some of them copies of the originals with the fix in place) and adds new ones. All of it is MIT licensed:
 
 MIT License
 

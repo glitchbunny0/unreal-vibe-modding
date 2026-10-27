@@ -15,8 +15,8 @@ in CET's `onUpdate`, with the full power of a CET mod. A crash ends the player's
 2. If nothing answers: the game is not running, VibeBridge is not installed (`uvmod install-bridge`), or CET has not
    loaded it yet. CET loads mods at game start and when the player clicks "Reload all mods" in CET's overlay; ask
    the player to do that, it takes a second and keeps their session.
-3. `cet` `game_state` and `cet` `player_info` tell you where things stand. `Game.GetPlayer()` is `nil` in menus and
-   on loading screens: check before using it.
+3. `cet` `overview` tells you where things stand: district, eddies, time, tracked quest, vehicle. `Game.GetPlayer()`
+   is `nil` in menus and on loading screens: check before using it.
 
 ## Rules that keep the game alive
 
@@ -33,7 +33,12 @@ in CET's `onUpdate`, with the full power of a CET mod. A crash ends the player's
 ## How to find out what the game does
 
 - **Ready-made handlers first.** `cet` covers the player, inventory, equipment, status effects, nearby entities,
-  what the player looks at (`get_scanner_info`), TweakDB, quest facts, and observing a game function's calls.
+  what the player looks at (`get_scanner_info`), TweakDB (search by name, records with their fields), types
+  (`dump_type` lists a class's functions with signatures), quest facts, and observing a game function's calls. The
+  weather cannot be set on patch 2.5 (`set_weather` says so).
+- **CET's calling conventions.** A game function's out parameters come back as extra return values, success first:
+  `local ok, items = ts:GetItemList(player)`. A record's `DisplayName()` is a LocKey CName: read it with
+  `Game.GetLocalizedTextByKey(record:DisplayName())`.
 - **Then Lua.** The game's script API is what CET exposes: `Game.GetTransactionSystem()`, `Game.GetStatsSystem()`,
   `Game.GetScriptableSystemsContainer():Get("PreventionSystem")`, `GameTime.Hours(t)`, ... The decompiled game
   scripts (redscript) show how the game itself calls these, and NativeDB lists every type. Return

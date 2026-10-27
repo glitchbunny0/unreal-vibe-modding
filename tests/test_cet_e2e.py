@@ -170,7 +170,7 @@ class CetBridgeHarness:
     # --- the protocol ---------------------------------------------------------------------------------------------
 
     def test_installed_and_ready(self):
-        self.assertIn("34 CETBridge handlers", self.log())
+        self.assertIn("35 CETBridge handlers", self.log())
         info = json.loads((self.dir.cet / "mods" / "VibeBridge" / "LuaRepl" / "bridge.json").read_text())
         self.assertEqual((info["bridge"], info["mod"], info["cet"]), ("VibeBridge", "VibeBridge", "v1.38.1-fake"))
         listed = self.game.mods()
@@ -215,12 +215,41 @@ class CetBridgeHarness:
         self.assertTrue(answer["ok"], answer)
         self.assertEqual(answer["result"]["level"], 57)
         self.assertEqual(answer["result"]["position"], {"x": -1050.25, "y": 1340.5, "z": 30})
+        # cetbridge_fixes: absolute health beside the percentage, not the percentage as "health"
+        self.assertEqual((answer["result"]["health"], answer["result"]["healthPercent"]), (432, 89))
         self.assertIn("unknown handler", self.game.cet_query("nope")["error"])
         code, out, _ = run_cli(["cet", "player_info"])
         self.assertEqual(code, 0)
         self.assertEqual(json.loads(out)["streetCred"], 50)
         code, out, _ = run_cli(["cet"])
         self.assertIn("teleport(x, y, z)", out)
+
+    def test_fixed_handlers(self):
+        # out parameters come back as (success, list): the list is used, not the boolean
+        inv = self.game.cet_query("get_inventory")["result"]
+        self.assertEqual(inv["total"], 2)
+        self.assertEqual(inv["items"][0], {"id": "Items.money", "name": "Eurodollars", "quantity": 340925, "type": "gamedataItem_Record"})
+        weapons = self.game.cet_query("get_inventory", {"type": "Weapon"})["result"]["items"]
+        self.assertEqual([i["name"] for i in weapons], ["Satori"])
+        near = self.game.cet_query("get_nearby_entities")["result"]
+        self.assertEqual((near["count"], near["entities"][0]["name"], near["entities"][0]["distance"]), (1, "Cortes V5000 Valor", 5.0))
+        # TweakDB search needs a record type; short names work, and records without a name have none
+        found = self.game.cet_query("search_tweakdb", {"pattern": "KATANA"})["result"]
+        self.assertEqual([(r["path"], r.get("name")) for r in found["results"]],
+                         [("Items.Preset_Katana_Saburo", "Satori"), ("Items.w_katana_blade", None)])
+        found = self.game.cet_query("search_tweakdb", {"pattern": "quadra", "type": "Vehicle"})["result"]
+        self.assertEqual(found["results"][0]["type"], "gamedataVehicle_Record")
+        # DumpType's text, parsed and filtered
+        d = self.game.cet_query("dump_type", {"typeName": "PlayerPuppet"})["result"]
+        self.assertEqual(d["functions"], ["IsInCombat() => (Bool)", "GetLevel(Int32, Bool) => (Float)"])
+        self.assertEqual(d["properties"], ["quickSlotsManager: handle:QuickSlotsManager"])
+        self.assertEqual(self.game.cet_query("dump_type", {"typeName": "PlayerPuppet", "pattern": "combat"})["result"]["functions"],
+                         ["IsInCombat() => (Bool)"])
+        self.assertIn("Type not found", self.game.cet_query("dump_type", {"typeName": "Nope"})["error"])
+        self.assertIn("not possible", self.game.cet_query("set_weather", {"weather": "Rain"})["error"])
+        o = self.game.cet_query("overview")["result"]
+        self.assertEqual((o["level"], o["eddies"], o["time"]), (57, 340925, "day 76, 15:46"))
+        self.assertEqual(o["position"], {"x": -1050.3, "y": 1340.5, "z": 30})
 
     def test_game_objects(self):
         a = self.exec("Game.GetPlayer(), FakeEntityID(), vb.json({id = FakeEntityID(), p = Game.GetPlayer()})")
@@ -233,7 +262,7 @@ class CetBridgeHarness:
     def test_status_and_mcp(self):
         code, out, _ = run_cli(["status"])
         self.assertEqual(code, 0, out)
-        self.assertIn("VibeBridge: running (v0.1.0, CET v1.38.1-fake, 34 CETBridge handlers)", out)
+        self.assertIn("VibeBridge: running (v0.1.0, CET v1.38.1-fake, 35 CETBridge handlers)", out)
         self.assertIn("repl: VibeBridge answering", out)
         self.assertNotIn("external REPL", out)
         self.assertIn("[VibeBridge] v0.1.0 ready", out)

@@ -10,7 +10,8 @@
        vb.chunks(text)                a long text as several return values, which uvmod joins again
        vb.query(name [, args])        run one of CETBridge's game handlers; JSON {"ok":..,"result"|"error":..}
        vb.handlers()                  their names
-       cetbridge                      the handlers themselves (handlers.lua, from CETBridge: MIT, see LICENSE.CETBridge)
+       cetbridge                      the handlers themselves (handlers.lua, from CETBridge: MIT, see LICENSE.CETBridge,
+                                      with the fixes and additions in cetbridge_fixes.lua applied)
 
      DEVELOPMENT ONLY: anything that can write to the LuaRepl folder can run Lua in the game with the full power of a
      CET mod (which includes writing files and loading DLLs). There is no network listener. Never ship it to players. ]]
@@ -41,6 +42,13 @@ if not core then
 end
 local serializer = load_module("serializer")
 local handlers, handlers_err = load_module("handlers")
+-- CETBridge's handlers stay unmodified in handlers.lua; cetbridge_fixes.lua replaces the ones that fail on patch 2.5
+-- and adds new ones.
+local fixes, fixes_err = load_module("cetbridge_fixes")
+if handlers and fixes then
+    local ok, err = pcall(fixes, handlers)
+    if not ok then fixes_err = err end
+end
 
 local function read(path)
     local f = io.open(path, "rb")
@@ -141,6 +149,7 @@ registerForEvent("onInit", function()
         return
     end
     running = true
+    if fixes_err then log("CETBridge fixes did not load: %s", tostring(fixes_err)) end
     if handlers then
         log("v%s ready: %s (%d CETBridge handlers)", VERSION, FOLDER, #handler_names())
     else

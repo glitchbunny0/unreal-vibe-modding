@@ -1,6 +1,6 @@
-"""CETBridge's game handlers (bridge/cet/VibeBridge/handlers.lua, MIT, from cyber-engine-tweak-mcp via WkMCP), as
-VibeBridge offers them through `vb.query`. The catalog here describes them for the CLI and the MCP tool; a test
-checks it against the handlers in the Lua file."""
+"""CETBridge's game handlers (bridge/cet/VibeBridge/handlers.lua, MIT, from cyber-engine-tweak-mcp via WkMCP, with
+the fixes and additions in cetbridge_fixes.lua), as VibeBridge offers them through `vb.query`. The catalog here
+describes them for the CLI and the MCP tool; a test checks it against the handlers in the Lua files."""
 
 from __future__ import annotations
 
@@ -10,19 +10,25 @@ from importlib import resources
 
 # name: (arguments, what it does). READS change nothing in the game; CHANGES do.
 READS: dict[str, tuple[str, str]] = {
-    "player_info": ("", "level, street cred, health, max health, position"),
-    "game_state": ("", "game time, scene tier (gameplay, cinematic, ...), weather, security zone"),
+    "overview": ("", "the basics in one call: level, eddies, district, zone, wanted level, day and time, tracked quest "
+                     "and objective, vehicle (false: on foot), position"),
+    "player_info": ("", "level, street cred, health (absolute and percent), max health, position"),
+    "game_state": ("", "game time, scene tier (gameplay, cinematic, ...), rain, zone (Public, Safe, Restricted, Dangerous)"),
     "get_equipped": ("", "items in the player's equipment slots"),
-    "get_inventory": ("type?, limit?", "inventory items (TweakDB ids, names, quantities); type: part of the record class name"),
+    "get_inventory": ("type?, limit?", "inventory items (TweakDB id, name, quantity) and the total count; type: part of "
+                                       "the record class name, e.g. Weapon"),
     "get_active_effects": ("", "status effects on the player"),
     "get_appearance_info": ("", "the player's appearance"),
     "get_vehicle_list": ("", "vehicles the player owns"),
     "get_nearby_entities": ("radius?, type?, limit?", "entities around the player (type: NPC, Vehicle, Item, Device) with class, distance, position"),
     "get_scanner_info": ("", "the entity the player looks at: class, name, level, health, position"),
     "get_quest_fact": ("factName", "a quest fact's value (story flags, e.g. q001_rogue_met)"),
-    "tweakdb_get": ("path", "a TweakDB flat or record, e.g. Items.Preset_Katana_Saburo"),
-    "search_tweakdb": ("pattern, type?, limit?", "TweakDB record ids matching a pattern"),
-    "dump_type": ("typeName", "a game RTTI type's properties and functions, e.g. PlayerPuppet"),
+    "tweakdb_get": ("path", "a TweakDB flat, or a record with its class, name and fields, e.g. Items.Preset_Katana_Saburo"),
+    "search_tweakdb": ("pattern, type?, limit?", "TweakDB records whose id contains the pattern, with names; type: a record "
+                                                 "type (WeaponItem, Vehicle, ...), default items, vehicles, characters, "
+                                                 "status effects"),
+    "dump_type": ("typeName, pattern?", "a game type's functions with signatures and its properties (CET's DumpType), "
+                                        "e.g. PlayerPuppet; pattern filters"),
     "observe_events": ("className, eventName, maxBuffer?", "start recording calls of a game function (ObserveAfter); returns a subscriptionId"),
     "get_observations": ("subscriptionId", "the calls recorded since the last read (and clears them)"),
     "unobserve_events": ("subscriptionId", "stop recording (CET keeps the hook, which then does nothing)"),
@@ -38,7 +44,7 @@ CHANGES: dict[str, tuple[str, str]] = {
     "remove_status_effect": ("effectId", "remove a status effect"),
     "spawn_vehicle": ("vehicleId", "summon a vehicle; the game places it"),
     "set_time": ("hours, minutes?, seconds?", "set the game time"),
-    "set_weather": ("weather", "set the weather: Sunny, Cloudy, Rain, HeavyRain, Fog, Toxic, Sandstorm, Pollution"),
+    "set_weather": ("weather", "not possible on patch 2.5: the game's script API cannot set the weather"),
     "set_quest_fact": ("factName, value", "set a quest fact (can break quest progression)"),
     "toggle_god_mode": ("enabled", "make the player invulnerable or not"),
     "set_level": ("level?, streetCred?", "set the player's level and street cred"),
@@ -51,9 +57,14 @@ HANDLERS = {**READS, **CHANGES}
 
 
 def lua_handlers() -> list[str]:
-    """The handler names defined in the bundled handlers.lua."""
-    source = (resources.files("uvmod") / "bridge" / "cet" / "VibeBridge" / "handlers.lua").read_text(encoding="utf-8")
-    return sorted(set(re.findall(r"^function handlers\.([a-z_]+)\(", source, re.M)))
+    """The handler names defined in the bundled handlers.lua and cetbridge_fixes.lua."""
+    folder = resources.files("uvmod") / "bridge" / "cet" / "VibeBridge"
+    defined = re.compile(r"^\s*function handlers\.([a-z_]+)\(|^\s*handlers\.([a-z_]+) = function\(", re.M)
+    names: set[str] = set()
+    for name in ("handlers.lua", "cetbridge_fixes.lua"):
+        source = (folder / name).read_text(encoding="utf-8")
+        names |= {a or b for a, b in defined.findall(source)}
+    return sorted(names)
 
 
 def catalog() -> str:

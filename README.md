@@ -250,9 +250,9 @@ the game's Lua mod loader. Point it at CET's folder instead of a ue4ss folder:
 ```sh
 UVMOD_CET=C:\Games\Cyberpunk 2077\bin\x64\plugins\cyber_engine_tweaks   # instead of UVMOD_UE4SS
 uvmod install-bridge          # VibeBridge as a CET mod, in mods/VibeBridge; then reload CET's mods or start the game
-uvmod status                  # VibeBridge: running (v0.1.0, CET v1.38.1, 34 CETBridge handlers)
+uvmod status                  # VibeBridge: running (v0.1.0, CET v1.38.1, 35 CETBridge handlers)
 uvmod lua 'Game.GetPlayer():GetWorldPosition()'
-uvmod cet player_info         # {"level": 57, "streetCred": 50, "position": {...}, ...}
+uvmod cet overview            # {"district": "Rancho Coronado", "eddies": 340925, "quest": {...}, ...}
 uvmod cet                     # the game handlers: inventory, equipment, TweakDB, quest facts, teleport, ...
 ```
 
@@ -260,10 +260,12 @@ uvmod cet                     # the game handlers: inventory, equipment, TweakDB
   folder, so the `LuaRepl` folder is `mods/VibeBridge/LuaRepl`. Code runs in VibeBridge's environment (LuaJIT) with
   CET's API (`Game`, `TweakDB`, `Observe`, `Override`, `NewObject`, ...). `vb.json(value)` turns anything, game
   objects and 64-bit numbers included, into JSON.
-- **`uvmod cet HANDLER [ARGS]`** (MCP tool `cet`) calls one of 34 ready-made game handlers from
+- **`uvmod cet HANDLER [ARGS]`** (MCP tool `cet`) calls one of 35 ready-made game handlers: the 34 of
   [cyber-engine-tweak-mcp](https://github.com/Y4rd13/cyber-engine-tweak-mcp)'s CETBridge, in the version
-  [WkMCP](https://github.com/Guikingone/WkMCP) fixed, copied unmodified (MIT, see
-  `uvmod/bridge/cet/VibeBridge/LICENSE.CETBridge`). The list marks which ones change the game.
+  [WkMCP](https://github.com/Guikingone/WkMCP) fixed (MIT, see `uvmod/bridge/cet/VibeBridge/LICENSE.CETBridge`), kept
+  unmodified in `handlers.lua`, and `cetbridge_fixes.lua`, which replaces the ten that fail or come back incomplete on
+  patch 2.5 (inventory, nearby entities, TweakDB search and records, type dumps, vehicle names, health, zone) and adds
+  `overview` (eddies, district, wanted level, time, tracked quest). The list marks which ones change the game.
 - **What differs from UE4SS:** CET gives a mod no debug library, so a request cannot be stopped (`--limit` is checked,
   not enforced): never send a loop without a bound. Screenshots copy the game's window from the screen, and only while
   the game is the window in front (otherwise the picture would show the player's other programs). `log` reads CET's
