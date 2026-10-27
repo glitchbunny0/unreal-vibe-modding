@@ -17,6 +17,10 @@ from .transports import Status, Transport, make
 # Log lines `status` shows: the UE4SS version line, ExternalLuaRepl (not its per-request lines, which verbose
 # logging writes for every call), VibeBridge, hot-swap shells. Valid in Python and .NET regular expressions.
 STATUS_PATTERN = r"UE4SS - v|\[ExternalLuaRepl\] (?!Request )|\[VibeBridge\]|loaded WITHOUT logic|swapped logic|swap REFUSED"
+# The same for CET's scripting.log: VibeBridge, mods loading or failing to, reloads.
+CET_STATUS_PATTERN = r"\[VibeBridge\]|Mod .* (loaded|failed)|Ignoring mod|LuaVM: Reloaded|Tried to access invalid"
+
+UE_ONLY = "this needs UE4SS (an Unreal Engine game); with CET, use `lua` (Lua in VibeBridge) or `cet` (CETBridge's handlers)"
 
 def screenshot_lua(ui: bool = True) -> str:
     """Lua that asks the engine for one screenshot. `shot` alone leaves every UI out (HUD, menus, an overlay);
@@ -42,7 +46,16 @@ class Result:
         return bool(self.answer and self.answer.get("ok"))
 
 
-def timeout_message(delivery: str, seconds: float) -> str:
+def timeout_message(delivery: str, seconds: float, cet: bool = False) -> str:
+    if cet:
+        if delivery == "missing":
+            return ("NO BRIDGE: CET's mods/VibeBridge/LuaRepl folder is missing. Install VibeBridge (uvmod install-bridge), "
+                    "then reload CET's mods (overlay: Reload all mods) or start the game.")
+        if delivery == "bridge":
+            return (f"TIMEOUT after {seconds:g}s: VibeBridge did not answer (the game may be loading or stuck, or a request "
+                    "that never ends is running: CET cannot stop one).")
+        return (f"TIMEOUT after {seconds:g}s: nothing answered. The game is not running, or VibeBridge is not loaded "
+                "(reload CET's mods after installing it; see: uvmod status).")
     if delivery == "missing":
         return ("NO REPL: the game's ue4ss folder has no LuaRepl folder. Use a UE4SS build with the external Lua REPL and "
                 "[Debug] ExternalLuaReplEnabled = 1, or install the VibeBridge mod (uvmod install-bridge), then start the game.")
@@ -56,6 +69,10 @@ class Game:
     def __init__(self, settings: Settings, transport: Transport | None = None):
         self.settings = settings
         self.transport = transport or make(settings)
+
+    def no_answer(self, delivery: str, seconds: float | None = None) -> str:
+        """Why nothing answered, in this engine's terms."""
+        return timeout_message(delivery, self.settings.timeout if seconds is None else seconds, self.settings.is_cet)
 
     def request(self, request: dict[str, Any], timeout: float | None = None) -> Result:
         request_id = protocol.new_id()
@@ -86,7 +103,7 @@ class Game:
             return mod or self.settings.mod
         listed = self.mods()
         if not listed.answer:
-            raise GameError(timeout_message(listed.delivery, self.settings.timeout))
+            raise GameError(self.no_answer(listed.delivery))
         names = listed.answer.get("mods", [])
         if len(names) == 1:
             return names[0]
@@ -98,7 +115,7 @@ class Game:
         return self.request(protocol.exec_request(target, code, limit))
 
     def status(self) -> Status:
-        return self.transport.status(STATUS_PATTERN)
+        return self.transport.status(CET_STATUS_PATTERN if self.settings.is_cet else STATUS_PATTERN)
 
     def log(self, lines: int = 40, pattern: str = "") -> list[str]:
         return self.transport.log(lines, pattern)
@@ -125,7 +142,13 @@ class Game:
 
     def screenshot(self, out: str | None = None, mod: str | None = None, ui: bool = True) -> str:
         """Take an engine screenshot, with the game's UI unless `ui` is false, copy it here, scale it to 1280 px wide if
-        ffmpeg exists. Returns the path."""
+        ffmpeg exists. Returns the path. With CET (no screenshot call of its own) the game's window is copied from the
+        screen instead, always with its UI, and only while the game is the window in front."""
+        if self.settings.is_cet:
+            out = out or os.path.join(tempfile.gettempdir(), time.strftime("uvmod-shot-%H%M%S.jpg"))
+            png = os.path.splitext(out)[0] + ".png"
+            self.transport.capture(png)
+            return self._scaled(png, out)
         before = self.transport.newest_shot()
         result = self.exec(screenshot_lua(ui), mod)
         if not result.ok:
@@ -142,6 +165,11 @@ class Game:
         out = out or os.path.join(tempfile.gettempdir(), time.strftime("uvmod-shot-%H%M%S.jpg"))
         png = os.path.splitext(out)[0] + ".png"
         self.transport.fetch(now[0], png)
+        return self._scaled(png, out)
+
+    @staticmethod
+    def _scaled(png: str, out: str) -> str:
+        """`out` as a 1280 px wide JPEG made from `png` if ffmpeg is here (the PNG is then removed), else the PNG."""
         if shutil.which("ffmpeg") and not out.endswith(".png"):
             done = subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-i", png, "-vf", "scale=1280:-1", out])
             if done.returncode == 0:
@@ -153,6 +181,8 @@ class Game:
         """Run an engine console command as the local player (open a map, ...). Shipping builds compile many out."""
         from .helpers import lua_string
 
+        if self.settings.is_cet:
+            raise GameError(UE_ONLY)
         if not command.strip():
             raise GameError("a console command is needed")
         lua = (f"local pc = FindFirstOf(\"PlayerController\") if not pc:IsValid() then error(\"no player controller\") end "
@@ -168,6 +198,8 @@ class Game:
         """`count` engine screenshots `every_ms` apart, scheduled inside the game (so the timing is the game's, not the
         transport's), copied here and tiled into one contact sheet. Returns its path (or a folder of PNGs without
         ffmpeg)."""
+        if self.settings.is_cet:
+            raise GameError("bursts need the engine's own screenshots (UE4SS); with CET take single shots")
         if not 2 <= count <= 16:
             raise GameError("a burst is 2 to 16 screenshots")
         before = set(self.transport.recent_shots(count + 4))
@@ -246,7 +278,7 @@ return "ok"
                     who = "VibeBridge" if listed.delivery == "bridge" else "UE4SS external REPL"
                     return True, f"ready after {elapsed:.0f} s ({who}; mods: {', '.join(listed.answer.get('mods', []))})"
                 if elapsed >= timeout:
-                    return False, f"NOT READY after {elapsed:.0f} s: {timeout_message(listed.delivery, 3.0)}"
+                    return False, f"NOT READY after {elapsed:.0f} s: {self.no_answer(listed.delivery, 3.0)}"
                 if elapsed > 30 and tries % 5 == 0 and self.status().running is False:
                     return False, f"the game is not running ({elapsed:.0f} s after waiting began); see: uvmod crash"
                 time.sleep(2.0)
@@ -258,6 +290,8 @@ return "ok"
         minidump), UE4SS's own crash dump, the end of UE4SS.log, and the last requests uvmod sent."""
         from .crash import parse_crash_context, parse_minidump
 
+        if self.settings.is_cet:
+            return self._crash_report_cet(journal_count)
         now = time.time()
         out: list[str] = []
         st = self.status()
@@ -326,6 +360,77 @@ return "ok"
         shutil.rmtree(tmp, ignore_errors=True)
         return "\n".join(out)
 
+    def _crash_report_cet(self, journal_count: int) -> str:
+        """crash_report for Cyberpunk 2077: REDEngine's newest crash report (its stack trace, the head of report.txt and
+        the minidump's exception), the end of CET's scripting.log, and the last requests uvmod sent."""
+        from .crash import parse_minidump
+
+        now = time.time()
+        out: list[str] = []
+        st = self.status()
+        out.append("game: " + ("running" if st.running else "not running" if st.running is False else "unknown")
+                   + (f" ({st.process}, started {st.started})" if st.running else ""))
+        folders = self.transport.crash_files().get("folders") or []
+        if folders:
+            f = folders[0]
+            path = f["path"].rstrip("/\\")
+            m = max(0, int((now - f["time"]) / 60))
+            when = f"{m} min ago" if m < 120 else time.strftime("%Y-%m-%d %H:%M", time.localtime(f["time"]))
+            if st.running:
+                out.append("(the game is running now: the crash report below is from an earlier session)")
+            out.append(f"\nnewest REDEngine crash report ({when}): {path}")
+            names = f.get("files") or []
+            for name, head in (("stacktrace.txt", 40), ("report.txt", 25)):
+                if name in names:
+                    try:
+                        lines = self.transport.read_text(f"{path}/{name}").splitlines()
+                        out.append(f"{name}:")
+                        out += ["  " + l for l in lines[:head] if l.strip()]
+                    except Exception as e:
+                        out.append(f"{name}: could not read it: {e}")
+            dmp = next((n for n in names if n.lower().endswith(".dmp")), None)
+            if dmp:
+                tmp = tempfile.mkdtemp(prefix="uvmod-crash-")
+                local = os.path.join(tmp, dmp)
+                try:
+                    self.transport.fetch(f"{path}/{dmp}", local)
+                    with open(local, "rb") as fh:
+                        out += parse_minidump(fh.read()).describe()[:16]
+                except Exception as e:
+                    out.append(f"minidump: could not read {path}/{dmp}: {e}")
+                finally:
+                    shutil.rmtree(tmp, ignore_errors=True)
+        else:
+            out.append("\nno REDEngine crash report")
+        out.append(f"\n{self.transport.engine.log}, last lines:")
+        out += ["  " + l for l in self.log(25)]
+        entries = journal.tail(self.settings, journal_count)
+        out.append("\nlast requests uvmod sent (a request with no answer right before the crash is the first suspect):")
+        out += ["  " + l for l in journal.render(entries).splitlines()]
+        if entries and st.running is False and entries[-1].get("done") in (None, "timeout", "failed"):
+            out.append("  -> the last request got no answer and the game is gone: it most likely killed the game.")
+        return "\n".join(out)
+
+    def cet_query(self, handler: str, args: dict | None = None, mod: str | None = None) -> dict:
+        """Run one of CETBridge's game handlers in VibeBridge (CET): {"ok": true, "result": ...} or {"ok": false,
+        "error": ...}. Raises GameError when nothing answered or the Lua around the handler failed."""
+        import json as _json
+
+        from .helpers import lua_string, lua_value
+
+        if not self.settings.is_cet:
+            raise GameError("CETBridge's handlers need Cyberpunk 2077 with CET (set UVMOD_CET)")
+        result = self.exec(f"return vb.query({lua_string(handler)}, {lua_value(args or {})})", mod)
+        if result.answer is None:
+            raise GameError(self.no_answer(result.delivery))
+        if not result.ok:
+            raise GameError(str(result.answer.get("error", "")))
+        text = "".join(v[1:-1] if len(v) >= 2 and v[0] == '"' and v[-1] == '"' else v for v in result.answer.get("values", []))
+        try:
+            return _json.loads(text)
+        except ValueError as e:
+            raise GameError(f"VibeBridge's answer is not JSON ({e}): {text[:200]}") from None
+
     # --- the reflection index -------------------------------------------------------------------------------------
 
     def build_index(self, from_file: str | None = None, blueprints: bool = True, keep: bool = False) -> str:
@@ -333,6 +438,9 @@ return "ok"
         build from a .jmap file already here). Returns a report."""
         from . import index
 
+        if self.settings.is_cet:
+            raise GameError("the reflection index is built from UE4SS's dump; for CET's types see NativeDB "
+                            "(nativedb.red4ext.com) or DumpType(\"ClassName\") through `lua`")
         folder = index.folder()
         folder.mkdir(parents=True, exist_ok=True)
         lines = []

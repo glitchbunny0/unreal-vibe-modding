@@ -47,8 +47,10 @@ class SshTransport(Transport):
         self.ssh = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", settings.host]
         self.retries = 0  # sessions started again because they never read their input
         self.u = psq(settings.ue4ss)
+        e = self.engine
         self.prelude = f"""$u = {self.u}
-$proc = {psq(settings.process)}
+$repl = Join-Path $u {psq(e.repl)}; $logf = Join-Path $u {psq(e.log)}; $mods = Join-Path $u {psq(e.mods)}
+$proc = {psq(settings.process or e.process)}
 if (-not $proc) {{
   $exe = Get-ChildItem -File -Filter '*-Shipping.exe' -Path (Split-Path $u), $u -ErrorAction SilentlyContinue | Select-Object -First 1
   if ($exe) {{ $proc = $exe.BaseName }}
@@ -117,7 +119,7 @@ function Get-Game {{ if ($proc) {{ Get-Process -Name $proc -ErrorAction Silently
 
     def exchange(self, request_id: str, native: bytes, slot: bytes, timeout: float) -> Exchange:
         script = f"""
-$dir = Join-Path $u '{protocol.FOLDER}'
+$dir = $repl
 if (-not (Test-Path $dir)) {{ 'missing'; exit 0 }}
 $info = Join-Path $dir '{protocol.BRIDGE_INFO}'
 $fresh = (Test-Path $info) -and (((Get-Date) - (Get-Item $info).LastWriteTime).TotalSeconds -le {protocol.BRIDGE_FRESH_SECONDS})
@@ -164,18 +166,18 @@ if ($text) {{ $text }} else {{
     def status(self, status_pattern: str) -> Status:
         script = f"""
 $p = Get-Game | Select-Object -First 1
-$l = Join-Path $u 'UE4SS.log'; $ini = Join-Path $u 'UE4SS-settings.ini'; $dir = Join-Path $u '{protocol.FOLDER}'
+$l = $logf; $ini = Join-Path $u 'UE4SS-settings.ini'; $dir = $repl
 $info = Join-Path $dir '{protocol.BRIDGE_INFO}'
 $r = [ordered]@{{
   process = [string]$proc; running = [bool]$p; pid = $(if ($p) {{ $p.Id }} else {{ $null }})
   started = $(if ($p) {{ $p.StartTime.ToString('HH:mm:ss') }} else {{ '' }})
   log_time = $(if (Test-Path $l) {{ (Get-Item $l).LastWriteTime.ToString('HH:mm:ss') }} else {{ '' }})
   log_lines = @($(if (Test-Path $l) {{ Get-Content -Encoding UTF8 $l | Where-Object {{ $_ -match {psq(status_pattern)} }} | Select-Object -Last 6 | ForEach-Object {{ [string]$_ }} }}))
-  repl_setting = [string](Select-String -Path $ini -Pattern '^\\s*ExternalLuaReplEnabled\\s*=' -ErrorAction SilentlyContinue | Select-Object -Last 1).Line
-  hot_reload_setting = [string](Select-String -Path $ini -Pattern '^\\s*EnableHotReloadSystem\\s*=' -ErrorAction SilentlyContinue | Select-Object -Last 1).Line
+  repl_setting = [string]$(if (Test-Path $ini) {{ (Select-String -Path $ini -Pattern '^\\s*ExternalLuaReplEnabled\\s*=' -ErrorAction SilentlyContinue | Select-Object -Last 1).Line }})
+  hot_reload_setting = [string]$(if (Test-Path $ini) {{ (Select-String -Path $ini -Pattern '^\\s*EnableHotReloadSystem\\s*=' -ErrorAction SilentlyContinue | Select-Object -Last 1).Line }})
   repl_folder = [bool](Test-Path $dir)
   bridge_age = $(if (Test-Path $info) {{ ((Get-Date) - (Get-Item $info).LastWriteTime).TotalSeconds }} else {{ $null }})
-  bridge_installed = [bool](Test-Path (Join-Path $u 'Mods\\VibeBridge\\enabled.txt'))
+  bridge_installed = [bool](Test-Path (Join-Path $u {psq(self.engine.bridge_marker)}))
 }}
 $r | ConvertTo-Json -Compress
 """
@@ -190,11 +192,11 @@ $r | ConvertTo-Json -Compress
     def log(self, lines: int, pattern: str = "") -> list[str]:
         tail = 20000 if pattern else max(lines, 1)
         filt = f"$lines = @($lines | Where-Object {{ $_ -match {psq(pattern)} }}) | Select-Object -Last {lines}" if pattern else ""
-        out = self.powershell(f"$lines = Get-Content -Encoding UTF8 -Tail {tail} (Join-Path $u 'UE4SS.log')\n{filt}\n$lines", timeout=60)
+        out = self.powershell(f"$lines = Get-Content -Encoding UTF8 -Tail {tail} $logf\n{filt}\n$lines", timeout=60)
         return out.splitlines()[-lines:] if lines > 0 else []
 
     def follow(self, pattern: str = "") -> Iterator[str]:
-        script = f"Get-Content -Encoding UTF8 -Tail 0 -Wait (Join-Path $u 'UE4SS.log') | Where-Object {{ $_ -match {psq(pattern or '.')} }}"
+        script = f"Get-Content -Encoding UTF8 -Tail 0 -Wait $logf | Where-Object {{ $_ -match {psq(pattern or '.')} }}"
         payload = base64.b64encode((self.prelude + script).encode("utf-8")) + b"\n"
         # The handshake as in powershell(), but streaming: lines are read here, not by the reader thread.
         for attempt in range(1, ATTEMPTS + 1):
@@ -229,7 +231,7 @@ $r | ConvertTo-Json -Compress
 
     def _push_script(self, local_dir: str) -> str:
         return f"""
-$mods = Join-Path $u 'Mods'
+New-Item -ItemType Directory -Force $mods | Out-Null
 $tar = Join-Path $env:TEMP 'uvmod-push.tar'
 [IO.File]::WriteAllBytes($tar, [Convert]::FromBase64String('{self._tar(local_dir)}'))
 tar -xf $tar -C $mods
@@ -313,6 +315,38 @@ Get-ChildItem -File -Filter *.png $d -ErrorAction SilentlyContinue | Sort-Object
     def make_folder(self, name: str) -> None:
         self.powershell(f"New-Item -ItemType Directory -Force (Join-Path $u {psq(name)}) | Out-Null", timeout=60)
 
+    def capture(self, dest: str) -> str:
+        # Like press_keys: a session started over SSH sees no windows, so the capture runs as a scheduled task in the
+        # logged-in user's session and leaves its PNG and a status line in TEMP.
+        from ..capture import script as capture_script
+
+        body = capture_script("__PROC__", "__PNG__", "__TXT__")
+        script = f"""
+$png = Join-Path $env:TEMP 'uvmod-shot.png'; $txt = Join-Path $env:TEMP 'uvmod-shot.txt'
+$ps1 = Join-Path $env:TEMP 'uvmod-shot.ps1'
+Remove-Item $png, $txt -ErrorAction SilentlyContinue
+$body = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('{base64.b64encode(body.encode("utf-8")).decode()}'))
+$body = $body.Replace('__PROC__', $proc.Replace("'", "''")).Replace('__PNG__', $png.Replace("'", "''")).Replace('__TXT__', $txt.Replace("'", "''"))
+Set-Content -Path $ps1 -Value $body -Encoding UTF8
+try {{
+  $a = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument ('-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "' + $ps1 + '"')
+  $p = New-ScheduledTaskPrincipal -UserId "$env:COMPUTERNAME\\$env:USERNAME" -LogonType Interactive
+  Register-ScheduledTask -TaskName 'uvmod-shot' -Action $a -Principal $p -Force -ErrorAction Stop | Out-Null
+  Start-ScheduledTask -TaskName 'uvmod-shot' -ErrorAction Stop
+}} catch {{ 'ERROR: ' + $_.Exception.Message; exit 0 }}
+$sw = [Diagnostics.Stopwatch]::StartNew()
+while (-not (Test-Path $txt) -and $sw.Elapsed.TotalSeconds -lt 30) {{ Start-Sleep -Milliseconds 100 }}
+if (-not (Test-Path $txt)) {{ 'ERROR: the capture did not finish (is a user logged in?)'; exit 0 }}
+(Get-Content -Raw -Encoding UTF8 $txt).Trim()
+$png.Replace('\\', '/')
+"""
+        lines = self.powershell(script, timeout=90).strip().splitlines()
+        status = lines[0] if lines else "ERROR: no answer from the game box"
+        if status.startswith("ERROR: "):
+            raise TransportError(status[len("ERROR: "):])
+        self.fetch(lines[1], dest)
+        return status
+
     # --- starting and stopping the game ---------------------------------------------------------------------------
 
     def launch(self) -> str:
@@ -321,7 +355,14 @@ Get-ChildItem -File -Filter *.png $d -ErrorAction SilentlyContinue | Sort-Object
         script = f"""
 $launch = {psq(self.settings.launch)}
 $appid = {psq(self.settings.appid)}
+$cetexe = {psq('cet' if self.settings.is_cet else '')}
 if ($launch) {{ $exe = 'cmd.exe'; $arg = '/c ' + $launch }}
+elseif ($cetexe -and -not $appid) {{
+  # Cyberpunk 2077: start the game's own exe (GOG runs it as is; a Steam copy hands itself over to Steam).
+  $exe = [IO.Path]::GetFullPath((Join-Path $u '..\\..\\Cyberpunk2077.exe'))
+  if (-not (Test-Path $exe)) {{ 'ERROR: no game exe at ' + $exe + ' (set UVMOD_LAUNCH)'; exit 0 }}
+  $arg = $null
+}}
 else {{
   if (-not $appid) {{
     $common = $u -replace '(?i)(\\\\steamapps\\\\common\\\\[^\\\\]+).*$', '$1'
@@ -338,7 +379,8 @@ else {{
   $exe = $steam; $arg = '-applaunch ' + $appid
 }}
 try {{
-  $a = New-ScheduledTaskAction -Execute $exe -Argument $arg
+  if ($arg) {{ $a = New-ScheduledTaskAction -Execute $exe -Argument $arg }}
+  else {{ $a = New-ScheduledTaskAction -Execute $exe -WorkingDirectory (Split-Path $exe) }}
   $p = New-ScheduledTaskPrincipal -UserId "$env:COMPUTERNAME\\$env:USERNAME" -LogonType Interactive
   Register-ScheduledTask -TaskName 'uvmod-launch' -Action $a -Principal $p -Force -ErrorAction Stop | Out-Null
   Start-ScheduledTask -TaskName 'uvmod-launch' -ErrorAction Stop
@@ -351,17 +393,18 @@ try {{
         return out
 
     def stop(self) -> str:
-        script = """
-if (-not $proc) { 'ERROR: unknown game process (set UVMOD_PROCESS)'; exit 0 }
-# After a crash, Unreal's crash reporter keeps running, and while it does Steam will not start the game again.
-$reporter = @(Get-Process -Name CrashReportClient -ErrorAction SilentlyContinue)
+        script = f"""
+if (-not $proc) {{ 'ERROR: unknown game process (set UVMOD_PROCESS)'; exit 0 }}
+# After a crash, the engine's crash reporter keeps running (Unreal's: and while it does Steam will not start the game
+# again).
+$reporter = @(Get-Process -Name {psq(self.engine.reporter)} -ErrorAction SilentlyContinue)
 $reporter | Stop-Process -Force -ErrorAction SilentlyContinue
-$closed = if ($reporter.Count) { ' (closed the crash reporter)' } else { '' }
-if (-not (Get-Game)) { "$proc is not running$closed"; exit 0 }
+$closed = if ($reporter.Count) {{ ' (closed the crash reporter)' }} else {{ '' }}
+if (-not (Get-Game)) {{ "$proc is not running$closed"; exit 0 }}
 Get-Process -Name $proc -ErrorAction SilentlyContinue | Stop-Process -Force
 $sw = [Diagnostics.Stopwatch]::StartNew()
-while ((Get-Game) -and $sw.Elapsed.TotalSeconds -lt 10) { Start-Sleep -Milliseconds 200 }
-if (Get-Game) { "$proc is still running" } else { "stopped $proc$closed" }
+while ((Get-Game) -and $sw.Elapsed.TotalSeconds -lt 10) {{ Start-Sleep -Milliseconds 200 }}
+if (Get-Game) {{ "$proc is still running" }} else {{ "stopped $proc$closed" }}
 """
         out = self.powershell(script, timeout=60).strip()
         if out.startswith("ERROR: "):
@@ -371,16 +414,18 @@ if (Get-Game) { "$proc is still running" } else { "stopped $proc$closed" }
     # --- crashes --------------------------------------------------------------------------------------------------
 
     def crash_files(self) -> dict:
-        script = """
-function T($i) { [DateTimeOffset]::new($i.LastWriteTimeUtc).ToUnixTimeSeconds() }
-$r = [ordered]@{ folders = @(); dumps = @() }
-if ($proc) {
-  $c = Join-Path $env:LOCALAPPDATA (($proc -replace '-(Win64|WinGDK)-Shipping$', '') + '\\Saved\\Crashes')
+        script = f"""
+function T($i) {{ [DateTimeOffset]::new($i.LastWriteTimeUtc).ToUnixTimeSeconds() }}
+$r = [ordered]@{{ folders = @(); dumps = @() }}
+$c = $null
+if ({psq('cet' if self.settings.is_cet else '')}) {{ $c = Join-Path $env:LOCALAPPDATA 'REDEngine\\ReportQueue' }}
+elseif ($proc) {{ $c = Join-Path $env:LOCALAPPDATA (($proc -replace '-(Win64|WinGDK)-Shipping$', '') + '\\Saved\\Crashes') }}
+if ($c) {{
   $r.folders = @(Get-ChildItem -Directory $c -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 3 |
-    ForEach-Object { [ordered]@{ path = $_.FullName.Replace('\\','/'); time = (T $_); files = @(Get-ChildItem -File $_.FullName | ForEach-Object { [string]$_.Name }) } })
-}
+    ForEach-Object {{ [ordered]@{{ path = $_.FullName.Replace('\\','/'); time = (T $_); files = @(Get-ChildItem -File $_.FullName | ForEach-Object {{ [string]$_.Name }}) }} }})
+}}
 $r.dumps = @(Get-ChildItem -File -Filter 'crash_*.dmp' $u -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 3 |
-  ForEach-Object { [ordered]@{ path = $_.FullName.Replace('\\','/'); time = (T $_) } })
+  ForEach-Object {{ [ordered]@{{ path = $_.FullName.Replace('\\','/'); time = (T $_) }} }})
 $r | ConvertTo-Json -Compress -Depth 5
 """
         data = json.loads(self.powershell(script, timeout=60).strip() or "{}")
@@ -396,6 +441,15 @@ $r | ConvertTo-Json -Compress -Depth 5
     def read_text(self, path: str) -> str:
         out = self.powershell(f"[Convert]::ToBase64String([IO.File]::ReadAllBytes({psq(path)}))", timeout=60).strip()
         return base64.b64decode(out).decode("utf-8", errors="replace")
+
+    def bridge_info(self) -> dict | None:
+        out = self.powershell(f"$f = Join-Path $repl '{protocol.BRIDGE_INFO}'; if (Test-Path $f) {{ [IO.File]::ReadAllText($f) }}",
+                              timeout=60).strip()
+        try:
+            info = json.loads(out) if out else None
+        except ValueError:
+            return None
+        return info if isinstance(info, dict) else None
 
     def files(self, pattern: str) -> list[dict]:
         folder, _, leaf = pattern.replace("/", "\\").rpartition("\\")

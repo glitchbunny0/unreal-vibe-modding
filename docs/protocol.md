@@ -64,3 +64,14 @@ the folder.
 
 The folder is the trust boundary. Anything that can write to it can run Lua in the game with the full power of a
 mod. There is no network listener. Do not use it in online play.
+
+## Cyber Engine Tweaks
+
+VibeBridge also exists as a CET mod for Cyberpunk 2077 (`uvmod/bridge/cet/VibeBridge`, `UVMOD_CET` on the client). It
+speaks protocol 1 with the VibeBridge delivery above, with these differences:
+
+- CET lets a mod read and write only inside its own folder, so the folder is `<cet>/mods/VibeBridge/LuaRepl`.
+- `bridge.json` carries two more fields: `cet` (CET's version) and `handlers` (how many game handlers it offers).
+- `mod` must be `VibeBridge`: CET gives every mod its own environment, and the bridge runs code only in its own.
+- `timeout_ms` is checked (1 to 5000) but not enforced: CET gives mods no debug library, so a running request cannot
+  be stopped. For the same reason errors carry no traceback.

@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Iterator
 
+from .. import engines
 from ..config import Settings
 
 
@@ -34,6 +35,7 @@ class Status:
 class Transport:
     def __init__(self, settings: Settings):
         self.settings = settings
+        self.engine = engines.get(settings.engine)
 
     def exchange(self, request_id: str, native: bytes, slot: bytes, timeout: float) -> Exchange:
         raise NotImplementedError
@@ -80,16 +82,29 @@ class Transport:
         raise NotImplementedError
 
     def stop(self) -> str:
-        """End the game's process (and Unreal's crash reporter)."""
+        """End the game's process (and the engine's crash reporter)."""
         raise NotImplementedError
 
     def crash_files(self) -> dict:
         """The newest crash evidence: {"folders": [{"path", "time", "files"}], "dumps": [{"path", "time"}]}, newest first.
-        Folders are Unreal's Saved/Crashes/<id>; dumps are UE4SS's own crash_*.dmp. Times are Unix seconds."""
+        Folders are Unreal's Saved/Crashes/<id> (UE4SS), or REDEngine's ReportQueue/<id> (CET); dumps are UE4SS's own
+        crash_*.dmp. Times are Unix seconds."""
         raise NotImplementedError
 
     def read_text(self, path: str) -> str:
         raise NotImplementedError
+
+    def bridge_info(self) -> dict | None:
+        """VibeBridge's heartbeat (bridge.json in the LuaRepl folder): its version and, with CET, CET's version and the
+        number of game handlers. None when there is none."""
+        raise NotImplementedError
+
+    def capture(self, dest: str) -> str:
+        """Copy the game's window from the screen into the PNG `dest`, as the player sees it, for engines with no
+        screenshot call of their own (CET). Refuses (TransportError) while another window is in front: the screen would
+        show the player's other programs. Returns a status line. Windows only: the ssh transport, or uvmod on the
+        game's PC."""
+        raise TransportError("window screenshots need Windows: the ssh transport, or uvmod running on the game's Windows PC")
 
     def press_keys(self, codes: list[int], hold_ms: int) -> str:
         """Press virtual keys in the game's window (brought to the front first). Returns the foreground window class

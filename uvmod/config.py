@@ -9,6 +9,7 @@ from pathlib import Path
 
 KEYS = {
     "UVMOD_UE4SS": "the game's ue4ss folder: a path on this machine, or the Windows path with the ssh transport",
+    "UVMOD_CET": "Cyberpunk 2077 instead: the Cyber Engine Tweaks folder (<game>/bin/x64/plugins/cyber_engine_tweaks)",
     "UVMOD_TRANSPORT": "local | ssh (default: ssh when UVMOD_HOST is set, else local)",
     "UVMOD_HOST": "ssh target for the ssh transport, e.g. player@192.168.1.20",
     "UVMOD_MOD": "the Lua mod whose state runs code (default: the only one there is; see: uvmod mods)",
@@ -55,7 +56,7 @@ class ConfigError(Exception):
 
 @dataclass
 class Settings:
-    ue4ss: str
+    ue4ss: str  # the mod loader's folder: UE4SS's, or CET's when engine is "cet"
     transport: str
     host: str = ""
     mod: str = ""
@@ -67,15 +68,22 @@ class Settings:
     launch: str = ""
     journal: str = ""
     index: str = ""
+    engine: str = "ue4ss"  # "ue4ss" | "cet" (see engines.py)
+
+    @property
+    def is_cet(self) -> bool:
+        return self.engine == "cet"
 
     @classmethod
     def load(cls, overrides: dict[str, str] | None = None) -> "Settings":
         values = _read_file(config_path())
         values.update({k: v for k, v in os.environ.items() if k.startswith("UVMOD_")})
         values.update(overrides or {})
-        ue4ss = values.get("UVMOD_UE4SS", "")
-        if not ue4ss:
-            raise ConfigError(f"UVMOD_UE4SS is not set (environment or {config_path()}; see: uvmod help)")
+        ue4ss, cet = values.get("UVMOD_UE4SS", ""), values.get("UVMOD_CET", "")
+        if ue4ss and cet:
+            raise ConfigError("both UVMOD_UE4SS and UVMOD_CET are set; keep one (UVMOD_CONFIG can point at a config file per game)")
+        if not ue4ss and not cet:
+            raise ConfigError(f"neither UVMOD_UE4SS nor UVMOD_CET is set (environment or {config_path()}; see: uvmod help)")
         host = values.get("UVMOD_HOST", "")
         transport = values.get("UVMOD_TRANSPORT") or ("ssh" if host else "local")
         if transport not in ("local", "ssh"):
@@ -87,7 +95,8 @@ class Settings:
         except ValueError as e:
             raise ConfigError(f"bad number in settings: {e}") from None
         return cls(
-            ue4ss=ue4ss,
+            ue4ss=ue4ss or cet,
+            engine="cet" if cet else "ue4ss",
             transport=transport,
             host=host,
             mod=values.get("UVMOD_MOD", ""),

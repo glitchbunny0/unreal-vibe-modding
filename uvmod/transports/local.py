@@ -15,7 +15,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Iterator
 
-from .. import protocol
+from .. import engines, protocol
 from . import Exchange, Status, Transport, TransportError
 
 POLL = 0.01
@@ -69,8 +69,9 @@ class LocalTransport(Transport):
         super().__init__(settings)
         self.root = Path(settings.ue4ss)
         if not self.root.is_dir():
-            raise TransportError(f"UVMOD_UE4SS is not a folder on this machine: {self.root} (local transport)")
-        self.folder = self.root / protocol.FOLDER
+            what = "UVMOD_CET" if settings.is_cet else "UVMOD_UE4SS"
+            raise TransportError(f"{what} is not a folder on this machine: {self.root} (local transport)")
+        self.folder = self.root / self.engine.repl
 
     # --- requests ------------------------------------------------------------------------------------------------
 
@@ -126,6 +127,8 @@ class LocalTransport(Transport):
     def _process(self) -> str:
         if self.settings.process:
             return self.settings.process
+        if self.engine.process:
+            return self.engine.process
         for exe in sorted(glob.glob(str(self.root.parent / "*-Shipping.exe")) + glob.glob(str(self.root / "*-Shipping.exe"))):
             return Path(exe).stem
         return ""
@@ -165,7 +168,7 @@ class LocalTransport(Transport):
         s = Status(process=self._process())
         s.pid = self._pid(s.process)
         s.running = (s.pid is not None) if s.process else None
-        log = self.root / "UE4SS.log"
+        log = self.root / self.engine.log
         if log.exists():
             s.log_time = datetime.fromtimestamp(log.stat().st_mtime).strftime("%H:%M:%S")
             s.log_lines = [l for l in self.log(20000) if re.search(status_pattern, l)][-6:]
@@ -174,12 +177,12 @@ class LocalTransport(Transport):
         s.hot_reload_setting = read_ini_line(ini, "EnableHotReloadSystem")
         s.repl_folder = self.folder.is_dir()
         s.bridge_age = self.bridge_age()
-        s.bridge_installed = (self.root / "Mods" / "VibeBridge" / "enabled.txt").exists()
+        s.bridge_installed = (self.root / self.engine.bridge_marker).exists()
         return s
 
     def log(self, lines: int, pattern: str = "") -> list[str]:
         try:
-            text = (self.root / "UE4SS.log").read_text(encoding="utf-8", errors="replace")
+            text = (self.root / self.engine.log).read_text(encoding="utf-8", errors="replace")
         except OSError:
             return []
         all_lines = [l.rstrip("\r") for l in text.splitlines()]
@@ -189,7 +192,7 @@ class LocalTransport(Transport):
         return all_lines[-lines:] if lines > 0 else []
 
     def follow(self, pattern: str = "") -> Iterator[str]:
-        path = self.root / "UE4SS.log"
+        path = self.root / self.engine.log
         rx = re.compile(pattern or ".", re.I)
         pos = path.stat().st_size if path.exists() else 0
         pending = ""
@@ -215,7 +218,7 @@ class LocalTransport(Transport):
 
     def _copy_mod(self, local_dir: str) -> Path:
         src = Path(local_dir)
-        dest = self.root / "Mods" / src.name
+        dest = self.root / self.engine.mods / src.name
         shutil.copytree(src, dest, dirs_exist_ok=True, ignore=lambda d, names: ["hotswap"] if Path(d) == src else [])
         return dest
 
@@ -286,6 +289,13 @@ class LocalTransport(Transport):
             subprocess.Popen(self.settings.launch, shell=True, start_new_session=os.name != "nt",
                              stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             return f"started: {self.settings.launch}"
+        if self.settings.is_cet and os.name == "nt":
+            exe = self.root.joinpath(*engines.CET_EXE_FROM_ROOT).resolve()
+            if not exe.is_file():
+                raise TransportError(f"no game exe at {exe}; set UVMOD_LAUNCH to a command that starts the game")
+            subprocess.Popen([str(exe)], cwd=str(exe.parent), stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL)
+            return f"started {exe}"
         appid = self.appid()
         if not appid:
             raise TransportError("no Steam app id: set UVMOD_APPID (or UVMOD_LAUNCH to a command that starts the game)")
@@ -304,11 +314,13 @@ class LocalTransport(Transport):
         process = self._process()
         if not process:
             raise TransportError("unknown game process (set UVMOD_PROCESS)")
-        # After a crash, Unreal's crash reporter keeps running, and while it does Steam will not start the game again.
+        # After a crash, the engine's crash reporter keeps running (Unreal's: and while it does Steam will not start the
+        # game again).
+        reporter = self.engine.reporter
         if os.name == "nt":
-            subprocess.run(["taskkill", "/IM", "CrashReportClient.exe", "/F"], capture_output=True, timeout=30)
+            subprocess.run(["taskkill", "/IM", f"{reporter}.exe", "/F"], capture_output=True, timeout=30)
         else:
-            for pid in self._linux_pids("CrashReportClient"):
+            for pid in self._linux_pids(reporter):
                 try:
                     os.kill(pid, signal.SIGKILL)
                 except OSError:
@@ -333,7 +345,10 @@ class LocalTransport(Transport):
 
     def crash_files(self) -> dict:
         out: dict = {"folders": [], "dumps": []}
-        crashes = self._saved_dir("Crashes")
+        if self.settings.is_cet:
+            crashes = self._redengine_reports()
+        else:
+            crashes = self._saved_dir("Crashes")
         if crashes and crashes.is_dir():
             folders = sorted((p for p in crashes.iterdir() if p.is_dir()), key=lambda p: p.stat().st_mtime, reverse=True)
             out["folders"] = [{"path": str(p), "time": p.stat().st_mtime, "files": sorted(f.name for f in p.iterdir())}
@@ -342,8 +357,26 @@ class LocalTransport(Transport):
         out["dumps"] = [{"path": str(p), "time": p.stat().st_mtime} for p in dumps[:3]]
         return out
 
+    def _redengine_reports(self) -> Path | None:
+        """<LocalAppData>/REDEngine/ReportQueue: one folder per crash (minidump, report.txt, stacktrace.txt)."""
+        if os.environ.get("LOCALAPPDATA"):
+            return Path(os.environ["LOCALAPPDATA"]) / "REDEngine" / "ReportQueue"
+        parts = self.root.as_posix().split("/steamapps/")
+        if len(parts) > 1:
+            pattern = f"{parts[0]}/steamapps/compatdata/*/pfx/drive_c/users/steamuser/AppData/Local/REDEngine/ReportQueue"
+            for d in glob.glob(pattern):
+                return Path(d)
+        return None
+
     def read_text(self, path: str) -> str:
         return Path(path).read_text(encoding="utf-8", errors="replace")
+
+    def bridge_info(self) -> dict | None:
+        try:
+            info = json.loads((self.folder / protocol.BRIDGE_INFO).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None
+        return info if isinstance(info, dict) else None
 
     def files(self, pattern: str) -> list[dict]:
         found = sorted(self.root.glob(pattern), key=lambda p: p.stat().st_mtime, reverse=True)
@@ -376,7 +409,24 @@ class LocalTransport(Transport):
         return [str(p) for p in sorted(d.glob("*.png"), key=lambda p: p.stat().st_mtime, reverse=True)[:count]]
 
     def make_folder(self, name: str) -> None:
-        (self.root / name).mkdir(exist_ok=True)
+        (self.root / name).mkdir(parents=True, exist_ok=True)
+
+    def capture(self, dest: str) -> str:
+        if os.name != "nt":
+            return super().capture(dest)
+        from .. import capture
+        import tempfile as _tempfile
+
+        tmp = Path(_tempfile.gettempdir())
+        png, txt = tmp / "uvmod-shot.png", tmp / "uvmod-shot.txt"
+        txt.unlink(missing_ok=True)
+        subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command",
+                        capture.script(self._process(), str(png), str(txt))], capture_output=True, timeout=60)
+        status = txt.read_text(encoding="utf-8-sig", errors="replace").strip() if txt.exists() else "ERROR: the capture did not run"
+        if status.startswith("ERROR: "):
+            raise TransportError(status[len("ERROR: "):])
+        shutil.move(str(png), dest)
+        return status
 
     def fetch(self, path: str, dest: str) -> None:
         shutil.copyfile(path, dest)

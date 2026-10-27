@@ -11,7 +11,7 @@ from importlib import resources
 
 from . import __version__, journal, protocol
 from .config import KEYS, ConfigError, Settings
-from .game import Game, GameError, timeout_message
+from .game import UE_ONLY, Game, GameError, timeout_message
 from .census import Census
 from .inputs import Input, parse_value, press_key
 from .reflection import Inspector, parse_cli_args, render
@@ -106,6 +106,16 @@ The game itself
   uvmod ps < script.ps1                     run PowerShell on the game box (ssh transport)
   uvmod mcp                                 MCP server on stdio, for AI agents
 
+Cyberpunk 2077 (Cyber Engine Tweaks: set UVMOD_CET instead of UVMOD_UE4SS)
+  uvmod install-bridge                      install VibeBridge as a CET mod; then reload CET's mods (overlay: Reload all
+        mods) or start the game. Lua runs in VibeBridge's environment (LuaJIT, CET's sandbox and API: Game, GetPlayer,
+        TweakDB, Observe, ...); `vb.json(value)` gives JSON for any value. CET cannot stop a request: no endless loops
+  uvmod cet [HANDLER [ARGS]]                CETBridge's game handlers: player_info, game_state, get_inventory,
+        teleport, ... (no HANDLER: the list). ARGS: a JSON object or key=value pairs
+  lua, run, mods, status, log (CET's scripting.log), follow, push (into mods/), shot (the game window, copied from
+        the screen), launch, stop, restart, ready, crash (REDEngine's crash report), journal and mcp work too; the
+        Unreal reflection, input, calls, watch, index and console commands do not
+
   lua/run/mods take --mod NAME, --limit MS (1-5000) and --json (print the raw answer); the watch commands
   take --mod too (watches live in that mod's Lua state).
   Exit codes: 0 OK, 1 the Lua raised an error, 2 usage or settings, 3 nothing answered, 4 wait timed out.
@@ -121,9 +131,9 @@ Two things can answer inside the game; uvmod finds out which:
 """
 
 
-def print_result(result, as_json: bool, timeout: float) -> int:
+def print_result(result, as_json: bool, timeout: float, cet: bool = False) -> int:
     if result.answer is None:
-        print(timeout_message(result.delivery, timeout))
+        print(timeout_message(result.delivery, timeout, cet))
         return EXIT_NO_ANSWER
     if as_json:
         print(json.dumps(dict(result.answer, delivery=result.delivery), ensure_ascii=False))
@@ -134,6 +144,7 @@ def print_result(result, as_json: bool, timeout: float) -> int:
 
 def cmd_status(game: Game) -> int:
     s = game.status()
+    cet = game.settings.is_cet
     if s.running is None:
         print("game: unknown (no *-Shipping.exe beside the ue4ss folder; set UVMOD_PROCESS)")
     elif s.running:
@@ -144,17 +155,25 @@ def cmd_status(game: Game) -> int:
         print(f"log: {s.log_time}")
         for line in s.log_lines:
             print(f"  {line}")
-    print(f"external REPL setting: {s.repl_setting or 'not in UE4SS-settings.ini (this UE4SS build has none)'}")
+    if not cet:
+        print(f"external REPL setting: {s.repl_setting or 'not in UE4SS-settings.ini (this UE4SS build has none)'}")
     if s.bridge_age is not None:
         state = "running" if s.bridge_age <= protocol.BRIDGE_FRESH_SECONDS else f"not running (last heartbeat {s.bridge_age:.0f} s ago)"
+        if cet:
+            # CET writes info lines to its logs only when a warning flushes them, so the heartbeat says more.
+            info = game.transport.bridge_info() or {}
+            facts = [f"v{info['version']}" if info.get("version") else "", f"CET {info['cet']}" if info.get("cet") else "",
+                     f"{info['handlers']} CETBridge handlers" if info.get("handlers") else ""]
+            state += f" ({', '.join(f for f in facts if f)})" if any(facts) else ""
         print(f"VibeBridge: {state}")
     else:
         print(f"VibeBridge: {'installed, no heartbeat yet' if s.bridge_installed else 'not installed'}")
-    hr = s.hot_reload_setting
-    warn = "  <- unsafe once any mod hooks Blueprint functions (hang or crash on reload)" if hr.replace(" ", "").endswith("=1") else ""
-    print(f"hot reload: {hr or '?'}{warn}")
+    if not cet:
+        hr = s.hot_reload_setting
+        warn = "  <- unsafe once any mod hooks Blueprint functions (hang or crash on reload)" if hr.replace(" ", "").endswith("=1") else ""
+        print(f"hot reload: {hr or '?'}{warn}")
     if not s.repl_folder:
-        print("repl: no LuaRepl folder (see: uvmod help)")
+        print("repl: no LuaRepl folder in mods/VibeBridge (uvmod install-bridge)" if cet else "repl: no LuaRepl folder (see: uvmod help)")
         return EXIT_NO_ANSWER
     saved, game.settings.timeout = game.settings.timeout, min(game.settings.timeout, 3.0)
     try:
@@ -173,7 +192,7 @@ def cmd_status(game: Game) -> int:
             target = "none set: pass --mod or set UVMOD_MOD to one of the mods above"
         print(f"target: {target}")
         return EXIT_OK
-    print(f"repl: not answering ({timeout_message(listed.delivery, 3.0)})")
+    print(f"repl: not answering ({game.no_answer(listed.delivery, 3.0)})")
     return EXIT_NO_ANSWER
 
 
@@ -195,11 +214,15 @@ def cmd_watch(watcher: Watcher, args) -> int:
     return EXIT_OK
 
 
-def bridge_dir() -> str:
+def bridge_dir(engine: str = "ue4ss") -> str:
+    if engine == "cet":
+        return str(resources.files("uvmod") / "bridge" / "cet" / "VibeBridge")
     return str(resources.files("uvmod") / "bridge" / "VibeBridge")
 
 
 REFLECTION_COMMANDS = ("world", "find", "props", "funcs", "sig", "classes", "call", "snap", "diff", "snaps", "forget", "target")
+# What only UE4SS can do (Unreal reflection, Enhanced Input, Blueprint hooks, DumpJMAP, the engine console).
+UE_ONLY_COMMANDS = REFLECTION_COMMANDS + ("watch", "unwatch", "events", "wait", "watches", "calls", "index", "console")
 
 
 def cmd_reflection(insp: Inspector, args) -> int:
@@ -449,6 +472,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--mod")
     sub.add_parser("journal").add_argument("count", nargs="?", type=int, default=10)
     sub.add_parser("install-bridge")
+    p = sub.add_parser("cet")
+    p.add_argument("handler", nargs="?")
+    p.add_argument("args", nargs="*")
+    p.add_argument("--mod")
     sub.add_parser("ps")
     sub.add_parser("mcp")
     try:
@@ -466,11 +493,23 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         game = Game(Settings.load())
+        if game.settings.is_cet and (args.cmd in UE_ONLY_COMMANDS or (args.cmd == "input" and args.action != "key")):
+            print(f"uvmod: {args.cmd}: {UE_ONLY}", file=sys.stderr)
+            return EXIT_USAGE
+        if args.cmd == "cet":
+            from . import cet
+
+            if not args.handler:
+                print(cet.catalog())
+                return EXIT_OK
+            answer = game.cet_query(args.handler, cet.parse_args(" ".join(args.args)), args.mod)
+            print(cet.render(answer))
+            return EXIT_OK if answer.get("ok") else EXIT_LUA_ERROR
         if args.cmd in ("lua", "run"):
             code = args.code if args.cmd == "lua" else (sys.stdin.read() if args.file == "-" else open(args.file, encoding="utf-8").read())
-            return print_result(game.exec(code, args.mod, args.limit), args.json, game.settings.timeout)
+            return print_result(game.exec(code, args.mod, args.limit), args.json, game.settings.timeout, game.settings.is_cet)
         if args.cmd == "mods":
-            return print_result(game.mods(), args.json, game.settings.timeout)
+            return print_result(game.mods(), args.json, game.settings.timeout, game.settings.is_cet)
         if args.cmd == "status":
             return cmd_status(game)
         if args.cmd == "log":
@@ -567,10 +606,16 @@ def main(argv: list[str] | None = None) -> int:
             print(journal.render(journal.tail(game.settings, args.count)))
             return EXIT_OK
         if args.cmd == "install-bridge":
-            print(game.push(bridge_dir()))
-            game.transport.make_folder(protocol.FOLDER)
-            print(f"created {protocol.FOLDER}/. VibeBridge loads at the next game start; it stays idle if this UE4SS has its "
-                  "external REPL turned on.")
+            engine = game.transport.engine
+            print(game.push(bridge_dir(engine.name)))
+            game.transport.make_folder(engine.repl)
+            if game.settings.is_cet:
+                print(f"created {engine.repl}/. VibeBridge loads when CET loads its mods: reload them in CET's overlay "
+                      "(Reload all mods) or start the game. DEVELOPMENT ONLY: whatever can write to that folder runs Lua "
+                      "in the game.")
+            else:
+                print(f"created {protocol.FOLDER}/. VibeBridge loads at the next game start; it stays idle if this UE4SS has its "
+                      "external REPL turned on.")
             return EXIT_OK
         if args.cmd == "ps":
             print(game.transport.powershell(sys.stdin.read()), end="")

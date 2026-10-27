@@ -323,16 +323,107 @@ def text(content: str, is_error: bool = False) -> dict[str, Any]:
     return {"content": [{"type": "text", "text": content}], "isError": is_error}
 
 
+CET_INSTRUCTIONS = """Drives a running Cyberpunk 2077 through Cyber Engine Tweaks (the VibeBridge CET mod): run Lua in the game,
+call ready-made game handlers (`cet`), read CET's log, take screenshots of the game window, push CET mods. Start with
+`status`. Code runs with the full power of a CET mod inside the player's game: a mistake can crash or freeze it, and CET
+cannot stop a request that never ends. Read before you write, keep changes small, look at the result after each one,
+and ask the player before changing their save (items, quest facts, levels)."""
+
+CET_LUA_RULES = """Runs Lua (LuaJIT: Lua 5.1) inside the VibeBridge CET mod, in onUpdate on the game's thread, and returns
+printed lines, return values (display strings) or the error (without a traceback: CET gives mods no debug library).
+Globals persist between calls; locals do not. CET's API is there: Game.GetPlayer(), Game.GetStatsSystem(),
+Game.GetTransactionSystem() and the rest of the game's script API (NativeDB lists it), TweakDB:GetFlat/SetFlat, NewObject,
+ObserveAfter/Override, Dump/DumpType/GameDump, GetMod(name). `vb.json(value)` returns JSON for any value (tables, game
+objects, CET's types, 64-bit numbers); `return vb.chunks(vb.json(x))` for anything over 4 KB.
+Rules: limit_ms is not enforced (CET cannot interrupt Lua), so never loop without a bound. Game.GetPlayer() is nil in
+menus and loading screens. 64-bit numbers are LuaJIT cdata (tonumber() them for maths). Observe/Override callbacks stay
+until CET reloads its mods: register them once and remember what you added."""
+
+
+def tools_for(engine: str) -> list[dict[str, Any]]:
+    """The tools that work with this engine: everything for UE4SS; for CET the generic ones (with CET's wording) plus
+    `cet`, without the Unreal reflection, input, calls, watch, swap and api tools."""
+    if engine != "cet":
+        return TOOLS
+    from . import cet
+
+    keep = ("lua", "mods", "status", "log", "screenshot", "push", "game")
+    out = []
+    for tool in TOOLS:
+        if tool["name"] not in keep:
+            continue
+        tool = json.loads(json.dumps(tool))
+        name = tool["name"]
+        if name == "lua":
+            tool["description"] = CET_LUA_RULES
+            tool["inputSchema"]["properties"]["limit_ms"]["description"] = "Checked but not enforced by CET; default 250."
+        elif name == "log":
+            tool["description"] = "The last lines of CET's scripting.log (mods loading, their prints and errors), optionally only those matching a regular expression (case-insensitive)."
+        elif name == "screenshot":
+            tool["description"] = ("Copies the game's window from the screen as the player sees it (HUD and menus included) and returns "
+                                   "the image. Look at the game yourself instead of asking the player to describe it. While another "
+                                   "window is in front it refuses (the screen would show the player's other programs): ask the player "
+                                   "to switch to the game.")
+            tool["inputSchema"] = {"type": "object", "properties": {}}
+        elif name == "push":
+            tool["description"] = "Copies a CET mod folder (with init.lua) from this machine into CET's mods/ folder. CET loads it when it reloads its mods (overlay: Reload all mods) or at the next game start."
+        elif name == "game":
+            tool["description"] = (
+                "Starts and stops the game, and finds out why it died. `launch` starts it (the game's exe, or the UVMOD_LAUNCH "
+                "command), `stop` ends its process, `restart` does both and waits until VibeBridge answers (that is how new "
+                "builds of CET mods with hooks load), `ready` waits for VibeBridge (up to `timeout_s`), `crash` reports why it "
+                "died: REDEngine's newest crash report (stack trace, report, the minidump's exception), the end of CET's "
+                "scripting.log, and the last requests sent from here (the one without an answer is the first suspect). After "
+                "a crash, read `crash` before restarting, and do not repeat the call that killed it.")
+            tool["inputSchema"]["properties"]["action"]["enum"] = ["launch", "stop", "restart", "ready", "crash"]
+            tool["inputSchema"]["properties"].pop("command", None)
+        out.append(tool)
+    out.append({
+        "name": "cet",
+        "description": ("Runs one of CETBridge's ready-made game handlers in the game and returns its result as JSON. "
+                        "Handlers marked as changing the game change the player's game (and their save once it is saved): "
+                        "ask the player first.\n" + cet.catalog()),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "handler": {"type": "string", "enum": sorted(cet.HANDLERS)},
+                "args": {"type": "object", "description": "The handler's arguments by name, e.g. {\"x\": 1, \"y\": 2, \"z\": 3}."},
+                "mod": {"type": "string"},
+            },
+            "required": ["handler"],
+        },
+    })
+    return out
+
+
 class Server:
     def __init__(self):
         self.game: Game | None = None
+        self._engine: str | None = None
 
     def _game(self) -> Game:
         if self.game is None:
             self.game = Game(Settings.load())
         return self.game
 
+    def engine(self) -> str:
+        """The engine the settings name; UE4SS when they cannot be read yet (the tools then say what is missing)."""
+        if self._engine is None:
+            try:
+                self._engine = Settings.load().engine
+            except ConfigError:
+                return "ue4ss"
+        return self._engine
+
+    def tools(self) -> list[dict[str, Any]]:
+        return tools_for(self.engine())
+
     def call(self, name: str, args: dict[str, Any]) -> dict[str, Any]:
+        if name == "cet":
+            from . import cet
+
+            answer = self._game().cet_query(str(args.get("handler") or ""), args.get("args") or {}, args.get("mod") or None)
+            return text(cet.render(answer), not answer.get("ok"))
         if name == "api" and args.get("action") in ("notes", "note"):
             from . import notes
 
@@ -363,7 +454,7 @@ class Server:
             else:
                 result = game.mods()
             if result.answer is None:
-                return text(timeout_message(result.delivery, game.settings.timeout), True)
+                return text(game.no_answer(result.delivery), True)
             via = "VibeBridge" if result.delivery == "bridge" else "UE4SS"
             in_game = f"{result.answer['elapsed_ms']:.2f} ms in the game, " if "elapsed_ms" in result.answer else ""
             footer = f"\n({via}, {in_game}{result.elapsed_s * 1000:.0f} ms round trip)"
@@ -528,16 +619,16 @@ class Server:
                     "protocolVersion": version,
                     "capabilities": {"tools": {}},
                     "serverInfo": {"name": "unreal-vibe-modding", "version": __version__},
-                    "instructions": INSTRUCTIONS,
+                    "instructions": CET_INSTRUCTIONS if self.engine() == "cet" else INSTRUCTIONS,
                 }
             elif method == "ping":
                 result = {}
             elif method == "tools/list":
-                result = {"tools": TOOLS}
+                result = {"tools": self.tools()}
             elif method == "tools/call":
                 params = msg.get("params") or {}
                 name = params.get("name", "")
-                if name not in {t["name"] for t in TOOLS}:
+                if name not in {t["name"] for t in self.tools()}:
                     return {"jsonrpc": "2.0", "id": msg_id, "error": {"code": -32602, "message": f"unknown tool: {name}"}}
                 try:
                     result = self.call(name, params.get("arguments") or {})
