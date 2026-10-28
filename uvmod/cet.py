@@ -20,8 +20,9 @@ READS: dict[str, tuple[str, str]] = {
     "get_active_effects": ("", "status effects on the player"),
     "get_appearance_info": ("", "the player's appearance"),
     "get_vehicle_list": ("", "vehicles the player owns"),
-    "get_nearby_entities": ("radius?, type?, limit?", "entities around the player (type: NPC, Vehicle, Item, Device) with class, distance, position"),
-    "get_scanner_info": ("", "the entity the player looks at: class, name, level, health, position"),
+    "get_nearby_entities": ("radius?, type?, limit?", "entities around the player, in view or not, once each (type: NPC, Vehicle, Item, Device) "
+                                                 "with class, name, distance, position"),
+    "get_scanner_info": ("", "the entity the player looks at: class, name, level, health (absolute and percent), position"),
     "get_quest_fact": ("factName", "a quest fact's value (story flags, e.g. q001_rogue_met)"),
     "tweakdb_get": ("path", "a TweakDB flat, or a record with its class, name and fields, e.g. Items.Preset_Katana_Saburo"),
     "search_tweakdb": ("pattern, type?, limit?", "TweakDB records whose id contains the pattern, with names; type: a record "
@@ -38,7 +39,7 @@ CHANGES: dict[str, tuple[str, str]] = {
     "tweakdb_set": ("path, type, value", "write a TweakDB flat (until the game restarts; wrong values can crash it)"),
     "add_item": ("itemId, quantity?", "give the player an item by TweakDB id"),
     "remove_item": ("itemId, quantity?", "take an item from the player"),
-    "teleport": ("x, y, z", "move the player"),
+    "teleport": ("x, y, z", "move the player, keeping their heading"),
     "set_stat": ("stat, value", "set a player stat with a modifier (a repeat call replaces it)"),
     "apply_status_effect": ("effectId", "apply a status effect, e.g. BaseStatusEffect.Berserk"),
     "remove_status_effect": ("effectId", "remove a status effect"),

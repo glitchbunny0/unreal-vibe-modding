@@ -1,6 +1,8 @@
 --[[ Fixes and additions for CETBridge's game handlers (handlers.lua, kept unmodified beside this file) on Cyberpunk 2077
      2.5 with CET 1.38. init.lua passes the handlers table through this module, which replaces the handlers that fail
-     there and adds `overview`. Each replacement says what was wrong. Checked live on patch 2.5 (2026-10-28).
+     there and adds `overview`. Each replacement says what was wrong. Checked live on patch 2.5 (2026-10-28), except
+     teleport and kill_nearby_npcs, which change the game. The teleport and nearby-entities fixes come from Roms1383's
+     WkMCP pull request #12.
      Same MIT terms as handlers.lua; see LICENSE.CETBridge. ]]
 
 local function try(f, ...)
@@ -80,6 +82,25 @@ return function(handlers)
         return info
     end
 
+    -- The same for what the player looks at: currentHealth was the percentage. Its display name is often a LocKey.
+    local get_scanner_info = handlers.get_scanner_info
+    handlers.get_scanner_info = function(args)
+        local info, err = get_scanner_info(args)
+        if not info then return info, err end
+        local target = try(function() return Game.GetTargetingSystem():GetLookAtObject(Game.GetPlayer()) end)
+        if target and info.currentHealth then
+            local pools = Game.GetStatPoolsSystem()
+            local abs = try(function() return pools:GetStatPoolValue(target:GetEntityID(), gamedataStatPoolType.Health, false) end)
+            local pct = try(function() return pools:GetStatPoolValue(target:GetEntityID(), gamedataStatPoolType.Health, true) end)
+            if abs then info.currentHealth = math.floor(abs) end
+            if pct then info.healthPercent = math.floor(pct) end
+        end
+        if type(info.displayName) == "string" then
+            info.displayName = (info.displayName ~= "" and info.displayName ~= "None") and localized(info.displayName) or nil
+        end
+        return info
+    end
+
     -- Weather and zone were always "unknown": 2.5's weather system has no GetWeatherState, and there is no
     -- Game.GetPreventionSystem. Now: the rain from the weather system and the zone from the player's state machine.
     local game_state = handlers.game_state
@@ -125,14 +146,32 @@ return function(handlers)
         return { count = #items, total = total, items = items }
     end
 
-    -- GetTargetParts returns (success, parts) in CET, the same mistake as get_inventory.
-    local function target_parts(player, query_name, radius)
-        local query = Game[query_name]()
+    -- GetTargetParts returns (success, parts) in CET, the same mistake as get_inventory. An entity has one target
+    -- part per component, so the entities are listed once each (ids by hash), without the player.
+    local function target_entities(player, query, radius)
         query.maxDistance = radius
         local _, parts = Game.GetTargetingSystem():GetTargetParts(player, query)
-        return type(parts) == "table" and parts or {}
+        local seen = { [tostring(player:GetEntityID().hash)] = true }
+        local entities = {}
+        for _, part in ipairs(type(parts) == "table" and parts or {}) do
+            local entity = try(function() return part:GetComponent():GetEntity() end)
+            local id = entity and try(function() return tostring(entity:GetEntityID().hash) end)
+            if id and not seen[id] then
+                seen[id] = true
+                entities[#entities + 1] = entity
+            end
+        end
+        return entities
     end
 
+    local function is_a(entity, class)
+        return try(function() return entity:IsA(class) end) == true
+    end
+
+    -- The search, the one-entry-per-entity rule and the class checks come from Roms1383's WkMCP pull request #12
+    -- (head ea519334ca): TSQ_ALL tests only the Visible set (no entities at all within 40 m in a live check), the
+    -- Complete set finds what is out of view too, and device classes (VendingMachine, ...) carry no "Device" in their
+    -- names.
     handlers.get_nearby_entities = function(args)
         local player = Game.GetPlayer()
         if not player then return nil, "Player not available" end
@@ -140,48 +179,62 @@ return function(handlers)
         local filter = args and args.type
         local limit = (args and args.limit) or 20
         local here = player:GetWorldPosition()
+        local query = TargetSearchQuery.new()
+        query.testedSet = TargetingSet.Complete
         local entities = {}
-        for _, part in ipairs(target_parts(player, "TSQ_ALL;", radius)) do
+        for _, entity in ipairs(target_entities(player, query, radius)) do
             if #entities >= limit then break end
-            local entity = try(function() return part:GetComponent():GetEntity() end)
-            if entity then
-                local class = name_string(entity:GetClassName()) or "Unknown"
-                local kind = "Unknown"
-                if class:find("NPC") or class:find("Puppet") then kind = "NPC"
-                elseif class:lower():find("vehicle") then kind = "Vehicle"
-                elseif class:lower():find("item") then kind = "Item"
-                elseif class:lower():find("device") then kind = "Device" end
-                if not filter or kind == filter then
-                    local pos = entity:GetWorldPosition()
-                    local dx, dy, dz = pos.x - here.x, pos.y - here.y, pos.z - here.z
-                    local name = try(function() return entity:GetDisplayName() end)
-                    entities[#entities + 1] = {
-                        className = class, type = kind, name = (name ~= "" and name) or nil,
-                        distance = math.floor(math.sqrt(dx * dx + dy * dy + dz * dz) * 10) / 10,
-                        position = { x = pos.x, y = pos.y, z = pos.z },
-                    }
-                end
+            local class = name_string(entity:GetClassName()) or "Unknown"
+            local lower = class:lower()
+            local kind = "Unknown"
+            if is_a(entity, "ScriptedPuppet") or class:find("NPC") or class:find("Puppet") then kind = "NPC"
+            elseif is_a(entity, "vehicleBaseObject") or lower:find("vehicle") then kind = "Vehicle"
+            elseif is_a(entity, "gameItemObject") or lower:find("item") then kind = "Item"
+            elseif is_a(entity, "Device") or lower:find("device") then kind = "Device" end
+            if not filter or kind == filter then
+                local pos = entity:GetWorldPosition()
+                local dx, dy, dz = pos.x - here.x, pos.y - here.y, pos.z - here.z
+                local name = try(function() return entity:GetDisplayName() end)
+                -- GetDisplayName gives a LocKey ("LocKey#106") or a secondary key for many entities, "None" for some
+                name = type(name) == "string" and name ~= "" and name ~= "None" and localized(name) or nil
+                entities[#entities + 1] = {
+                    className = class, type = kind, name = name,
+                    distance = math.floor(math.sqrt(dx * dx + dy * dy + dz * dz) * 10) / 10,
+                    position = { x = pos.x, y = pos.y, z = pos.z },
+                }
             end
         end
         return { radius = radius, count = #entities, entities = entities }
     end
 
+    -- Same out-parameter mistake; each NPC is now killed and counted once, not once per component.
     handlers.kill_nearby_npcs = function(args)
         local player = Game.GetPlayer()
         if not player then return nil, "Player not available" end
         local radius = (args and args.radius) or 30
         local all = args and args.allNpcs or false
         local killed = 0
-        for _, part in ipairs(target_parts(player, "TSQ_NPC;", radius)) do
-            local npc = try(function() return part:GetComponent():GetEntity() end)
-            if npc then
-                local hostile = all or try(function()
-                    return npc:GetAttitudeAgent():GetAttitudeTowards(player:GetAttitudeAgent()) == EAIAttitude.AIA_Hostile
-                end)
-                if hostile and pcall(function() npc:Kill(player, false, false) end) then killed = killed + 1 end
-            end
+        for _, npc in ipairs(target_entities(player, Game["TSQ_NPC;"](), radius)) do
+            local hostile = all or try(function()
+                return npc:GetAttitudeAgent():GetAttitudeTowards(player:GetAttitudeAgent()) == EAIAttitude.AIA_Hostile
+            end)
+            if hostile and pcall(function() npc:Kill(player, false, false) end) then killed = killed + 1 end
         end
         return { killed = killed, radius = radius, allNpcs = all }
+    end
+
+    -- Teleport called IsValid() on the player's orientation, a quaternion without that method, so it always failed;
+    -- and the facility takes EulerAngles. The fix keeps the player's heading, from Roms1383's WkMCP pull request #12.
+    handlers.teleport = function(args)
+        if not args or not args.x or not args.y or not args.z then return nil, "x, y, z coordinates are required" end
+        local player = Game.GetPlayer()
+        if not player then return nil, "Player not available" end
+        local ok, err = pcall(function()
+            local yaw = try(function() return player:GetWorldYaw() end)
+            Game.GetTeleportationFacility():Teleport(player, Vector4.new(args.x, args.y, args.z, 1.0), EulerAngles.new(0, 0, yaw or 0))
+        end)
+        if not ok then return nil, "Failed to teleport: " .. tostring(err) end
+        return { x = args.x, y = args.y, z = args.z, success = true }
     end
 
     -- Vehicle names came back as unresolved CNames (same LocKey mistake as the inventory).

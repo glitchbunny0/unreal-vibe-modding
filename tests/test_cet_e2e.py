@@ -231,8 +231,17 @@ class CetBridgeHarness:
         self.assertEqual(inv["items"][0], {"id": "Items.money", "name": "Eurodollars", "quantity": 340925, "type": "gamedataItem_Record"})
         weapons = self.game.cet_query("get_inventory", {"type": "Weapon"})["result"]["items"]
         self.assertEqual([i["name"] for i in weapons], ["Satori"])
+        # the Complete targeting set, each entity once, without the player, kinds from the class hierarchy (WkMCP #12)
         near = self.game.cet_query("get_nearby_entities")["result"]
-        self.assertEqual((near["count"], near["entities"][0]["name"], near["entities"][0]["distance"]), (1, "Cortes V5000 Valor", 5.0))
+        self.assertEqual([(e["className"], e["type"], e.get("name"), e["distance"]) for e in near["entities"]],
+                         [("vehicleCarBaseObject", "Vehicle", "Cortes V5000 Valor", 5.0), ("VendingMachine", "Device", "Vending Machine", 12.0)])
+        self.assertEqual(self.game.cet_query("get_nearby_entities", {"type": "Device"})["result"]["count"], 1)
+        scan = self.game.cet_query("get_scanner_info")["result"]
+        self.assertEqual((scan["displayName"], scan["currentHealth"], scan["healthPercent"]), ("Cortes V5000 Valor", 432, 89))
+        # teleport: EulerAngles keeping the player's heading, not a quaternion's missing IsValid (WkMCP #12)
+        self.assertTrue(self.game.cet_query("teleport", {"x": 1, "y": 2, "z": 3})["result"]["success"])
+        self.assertEqual(json.loads(self.exec("vb.json(FakeTeleports)")["values"][0][1:-1])[0],
+                         {"angles": {"pitch": 0, "roll": 0, "yaw": 37.5}, "pos": {"w": 1, "x": 1, "y": 2, "z": 3}})
         # TweakDB search needs a record type; short names work, and records without a name have none
         found = self.game.cet_query("search_tweakdb", {"pattern": "KATANA"})["result"]
         self.assertEqual([(r["path"], r.get("name")) for r in found["results"]],

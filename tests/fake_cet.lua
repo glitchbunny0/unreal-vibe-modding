@@ -92,9 +92,12 @@ local function game_object(class, methods)
     return setmetatable({}, { __index = index })
 end
 local entity_id = host.loadstring and host.loadstring("return 1234567890123ULL")() or 1234567890123
+local function is_a(...) local classes = { ... } return function(_, c) for _, k in ipairs(classes) do if k == c then return true end end return false end end
 local player = game_object("PlayerPuppet", {
-    GetEntityID = function() return entity_id end,
+    GetEntityID = function() return { hash = entity_id } end,
     GetWorldPosition = function() return { x = -1050.25, y = 1340.5, z = 30.0, w = 1.0 } end,
+    GetWorldYaw = function() return 37.5 end,
+    IsA = is_a("PlayerPuppet", "ScriptedPuppet"),
 })
 local stats = { Level = 57, StreetCred = 50, Health = 500 }
 env.gamedataStatType = { Level = "Level", StreetCred = "StreetCred", Health = "Health" }
@@ -140,11 +143,30 @@ env.DumpType = function(name)
     end
     return setmetatable({}, { __tostring = function() return text end })
 end
+-- Targeting: one target part per component (the car has two), the Complete set includes the player and what is
+-- out of view (the vending machine), the Visible set (TSQ_ALL) only the car.
 local car = game_object("vehicleCarBaseObject", {
+    GetEntityID = function() return { hash = 11 } end,
     GetWorldPosition = function() return { x = -1047.25, y = 1336.5, z = 30.0 } end,
     GetDisplayName = function() return "Cortes V5000 Valor" end,
+    IsA = is_a("vehicleCarBaseObject", "vehicleBaseObject"),
 })
-local car_part = game_object("gameTargetingComponent", { GetComponent = function() return game_object("x", { GetEntity = function() return car end }) end })
+local vending = game_object("VendingMachine", {
+    GetEntityID = function() return { hash = 12 } end,
+    GetWorldPosition = function() return { x = -1050.25, y = 1352.5, z = 30.0 } end,
+    GetDisplayName = function() return "LocKey#9" end,
+    IsA = is_a("VendingMachine", "Device"),
+})
+local function part(entity)
+    return game_object("gameTargetingComponent", { GetComponent = function() return game_object("x", { GetEntity = function() return entity end }) end })
+end
+local visible_parts = { part(car), part(car) }
+local complete_parts = { part(player), part(car), part(vending), part(car) }
+env.TargetingSet = { Visible = "Visible", Complete = "Complete" }
+env.TargetSearchQuery = { new = function() return { testedSet = "Visible" } end }
+env.Vector4 = { new = function(x, y, z, w) return { x = x, y = y, z = z, w = w } end }
+env.EulerAngles = { new = function(roll, pitch, yaw) return { roll = roll, pitch = pitch, yaw = yaw } end }
+env.FakeTeleports = {}
 env.GameTime = {
     Days = function(t) return math.floor(t / 86400) end,
     Hours = function(t) return math.floor(t / 3600) % 24 end,
@@ -153,19 +175,30 @@ env.GameTime = {
 env.Game = {
     GetPlayer = function() return player end,
     GetStatsSystem = function() return { GetStatValue = function(_, id, stat) return stats[stat] or 0 end } end,
-    GetStatPoolsSystem = function() return { GetStatPoolValue = function(_, id, pool, perc) return perc and 89.5 or 432.5 end } end,
+    -- without `perc` the pool comes back as a percentage, as in the game
+    GetStatPoolsSystem = function() return { GetStatPoolValue = function(_, id, pool, perc) return perc == false and 432.5 or 89.5 end } end,
     GetTransactionSystem = function()
         return {
             GetItemList = function() return true, { item_data("Items.money"), item_data("Items.Preset_Katana_Saburo") } end,
             GetItemQuantity = function(_, _, id) return id.tdbid.path == "Items.money" and 340925 or 1 end,
         }
     end,
-    GetTargetingSystem = function() return { GetTargetParts = function() return true, { car_part } end } end,
-    ["TSQ_ALL;"] = function() return {} end,
+    GetTargetingSystem = function()
+        return {
+            GetTargetParts = function(_, _, q) return true, q.testedSet == "Complete" and complete_parts or visible_parts end,
+            GetLookAtObject = function() return car end,
+        }
+    end,
+    ["TSQ_ALL;"] = function() return { testedSet = "Visible" } end,
+    GetTeleportationFacility = function()
+        return { Teleport = function(_, who, pos, angles) env.FakeTeleports[#env.FakeTeleports + 1] = { pos = pos, angles = angles } end }
+    end,
     GetTimeSystem = function() return { GetGameTime = function() return 76 * 86400 + 15 * 3600 + 46 * 60 end } end,
     GetLocalizedTextByKey = function(key) return type(key) == "table" and key.key or "" end,
+    GetLocalizedText = function(text) return ({ ["LocKey#9"] = "Vending Machine" })[text] or "" end,
     NameToString = function(cn) return type(cn) == "table" and cn.class or nil end,
 }
+env.NameToString = env.Game.NameToString -- CET has it as a global too
 env.FakeEntityID = function() return entity_id end
 
 local f = assert(io.open(MOD .. "/init.lua", "rb"))

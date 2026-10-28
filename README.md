@@ -263,8 +263,8 @@ uvmod cet                     # the game handlers: inventory, equipment, TweakDB
 - **`uvmod cet HANDLER [ARGS]`** (MCP tool `cet`) calls one of 35 ready-made game handlers: the 34 of
   [cyber-engine-tweak-mcp](https://github.com/Y4rd13/cyber-engine-tweak-mcp)'s CETBridge, in the version
   [WkMCP](https://github.com/Guikingone/WkMCP) fixed (MIT, see `uvmod/bridge/cet/VibeBridge/LICENSE.CETBridge`), kept
-  unmodified in `handlers.lua`, and `cetbridge_fixes.lua`, which replaces the ten that fail or come back incomplete on
-  patch 2.5 (inventory, nearby entities, TweakDB search and records, type dumps, vehicle names, health, zone) and adds
+  unmodified in `handlers.lua`, and `cetbridge_fixes.lua`, which replaces the twelve that fail or come back incomplete on
+  patch 2.5 (inventory, nearby entities, teleport, TweakDB search and records, type dumps, names, health, zone) and adds
   `overview` (eddies, district, wanted level, time, tracked quest). The list marks which ones change the game.
 - **What differs from UE4SS:** CET gives a mod no debug library, so a request cannot be stopped (`--limit` is checked,
   not enforced): never send a loop without a bound. Screenshots copy the game's window from the screen, and only while
