@@ -17,8 +17,10 @@ jobs:
           python-version: ${{ matrix.python }}
       - name: Lua 5.4
         run: sudo apt-get update -qq && sudo apt-get install -y -qq lua5.4
+      - name: LuaJIT (CET's Lua), through lupa
+        run: pip install lupa
       - name: Bridge syntax
-        run: for f in uvmod/bridge/VibeBridge/Scripts/*.lua tests/*.lua; do luac5.4 -p "$f"; done
+        run: for f in uvmod/bridge/VibeBridge/Scripts/*.lua uvmod/bridge/cet/VibeBridge/*.lua tests/*.lua; do luac5.4 -p "$f"; done
       - name: Client and bridge, end to end
         run: LUA=lua5.4 python -m unittest discover -s tests -v
       - name: Installs, and refuses cleanly without settings
@@ -27,4 +29,9 @@ jobs:
           uvmod help | grep -q 'uvmod mcp'
           out="$(UVMOD_CONFIG=/nonexistent uvmod status 2>&1)" && exit 1
           grep -q 'UVMOD_UE4SS is not set' <<<"$out"
-          test -f "$(python -c 'import uvmod, os; print(os.path.dirname(uvmod.__file__))')/bridge/VibeBridge/Scripts/main.lua"
+          out="$(UVMOD_CONFIG=/nonexistent UVMOD_CET=/nonexistent uvmod status 2>&1)" && exit 1
+          grep -q 'UVMOD_CET is not a folder' <<<"$out"
+          pkg="$(python -c 'import uvmod, os; print(os.path.dirname(uvmod.__file__))')"
+          test -f "$pkg/bridge/VibeBridge/Scripts/main.lua"
+          test -f "$pkg/bridge/cet/VibeBridge/init.lua"
+          test -f "$pkg/bridge/cet/VibeBridge/LICENSE.CETBridge"
