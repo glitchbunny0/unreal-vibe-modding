@@ -28,7 +28,7 @@ jobs:
           pip install .
           uvmod help | grep -q 'uvmod mcp'
           out="$(UVMOD_CONFIG=/nonexistent uvmod status 2>&1)" && exit 1
-          grep -q 'UVMOD_UE4SS is not set' <<<"$out"
+          grep -q 'neither UVMOD_UE4SS nor UVMOD_CET is set' <<<"$out"
           out="$(UVMOD_CONFIG=/nonexistent UVMOD_CET=/nonexistent uvmod status 2>&1)" && exit 1
           grep -q 'UVMOD_CET is not a folder' <<<"$out"
           pkg="$(python -c 'import uvmod, os; print(os.path.dirname(uvmod.__file__))')"
