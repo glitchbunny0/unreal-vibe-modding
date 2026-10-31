@@ -296,7 +296,7 @@ return "ok"
         out: list[str] = []
         st = self.status()
         out.append("game: " + ("running" if st.running else "not running" if st.running is False else "unknown")
-                   + (f" ({st.process}, started {st.started})" if st.running else ""))
+                   + (f" ({st.process}{', started ' + st.started if st.started else ''})" if st.running else ""))
         files = self.transport.crash_files()
         folders, dumps = files.get("folders") or [], files.get("dumps") or []
         tmp = tempfile.mkdtemp(prefix="uvmod-crash-")
@@ -369,7 +369,7 @@ return "ok"
         out: list[str] = []
         st = self.status()
         out.append("game: " + ("running" if st.running else "not running" if st.running is False else "unknown")
-                   + (f" ({st.process}, started {st.started})" if st.running else ""))
+                   + (f" ({st.process}{', started ' + st.started if st.started else ''})" if st.running else ""))
         folders = self.transport.crash_files().get("folders") or []
         if folders:
             f = folders[0]

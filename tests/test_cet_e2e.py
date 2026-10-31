@@ -64,6 +64,33 @@ def run_cli(argv):
 
 
 class SettingsAndCatalog(unittest.TestCase):
+    def test_unknown_start_time_is_left_out(self):
+        # The local transport cannot always read a process's start time (on Windows, not across sessions): status and
+        # crash then name the process without a dangling "started".
+        from unittest import mock
+        from uvmod.transports import Status
+        d = CetDir()
+        saved = {k: os.environ.get(k) for k in ENV_KEYS}
+        os.environ.update(d.env)
+        try:
+            running = Status(process="Cyberpunk2077", running=True, pid=4242)
+            with mock.patch.object(Game, "status", return_value=running):
+                code, out, _ = run_cli(["status"])
+                self.assertIn("game: running (Cyberpunk2077, pid 4242)\n", out)
+                text = Game(d.settings()).crash_report()
+                self.assertIn("game: running (Cyberpunk2077)\n", text)
+                running.started = "16:21:16"
+                code, out, _ = run_cli(["status"])
+                self.assertIn("game: running (Cyberpunk2077, pid 4242, started 16:21:16)", out)
+            self.assertNotIn("started )", out + text)
+        finally:
+            for k, v in saved.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+            d.close()
+
     def test_engine_from_settings(self):
         d = CetDir()
         try:

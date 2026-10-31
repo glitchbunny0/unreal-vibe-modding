@@ -148,7 +148,7 @@ def cmd_status(game: Game) -> int:
     if s.running is None:
         print("game: unknown (no *-Shipping.exe beside the ue4ss folder; set UVMOD_PROCESS)")
     elif s.running:
-        print(f"game: running ({s.process}, pid {s.pid}, started {s.started or '?'})")
+        print(f"game: running ({s.process}, pid {s.pid}" + (f", started {s.started}" if s.started else "") + ")")
     else:
         print(f"game: not running ({s.process})")
     if s.log_time:
