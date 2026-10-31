@@ -56,7 +56,10 @@ a quick probe.
   scripts (redscript) show how the game itself calls these, and NativeDB lists every type. Return
   `vb.json(value)` for structured answers, `vb.chunks(vb.json(value))` when it can be longer than 4 KB.
 - **Look at the game yourself** with `screenshot`. It copies the game's window from the screen, so it only works while
-  the game is the window in front; otherwise it refuses, and you ask the player to switch back.
+  the game is the window in front; otherwise it refuses, and you ask the player to switch back. When you run on the
+  game PC, your own window is usually the one in front: ask the player to switch to the game, then take the shot.
+- **CLI from Windows PowerShell 5.1:** write strings inside the Lua with single quotes; it drops embedded double quotes
+  from arguments. Or use `uvmod run file.lua`, or the MCP tools.
 - **The log lags.** CET writes `scripting.log` out when a warning flushes it, so recent info lines may be missing.
   Your prints come back in the answer anyway.
 

@@ -280,8 +280,14 @@ uvmod cet                     # the game handlers: inventory, equipment, TweakDB
   `scripting.log`, which CET writes out only when a warning flushes it. The Unreal-only commands (reflection, input,
   calls, watch, index, console) refuse to run.
 
+- **From Windows PowerShell 5.1**, write strings inside the Lua with single quotes (`uvmod lua "return 'text'"`):
+  PowerShell 5.1 drops double quotes inside an argument it hands to a program, so the Lua arrives broken. For longer
+  code, `uvmod run file.lua`. The MCP server has no such problem.
+
 Tested off-game under Lua 5.4 and LuaJIT (`tests/fake_cet.lua` stands in for CET's sandbox), and live on patch 2.5 with
-CET 1.38.1 over SSH, CLI and MCP. The agent skill for it is [`skills/cet-vibe-modding`](skills/cet-vibe-modding/SKILL.md).
+CET 1.38.1: on the game PC itself (Windows, Python 3.13; CLI, MCP and screenshot; a request's round trip took 30-50 ms, plus
+about 0.4 s of Python start-up per CLI call) and over SSH from another machine (about 0.9 s per request). The agent skill for it is
+[`skills/cet-vibe-modding`](skills/cet-vibe-modding/SKILL.md).
 
 ## Safety
 
