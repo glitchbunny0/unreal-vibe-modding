@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "unreal-vibe-modding"
-version = "0.1.0"
-description = "Vibe modding for Unreal Engine games: run Lua live in a running game through UE4SS, from a CLI or an MCP server"
+version = "0.2.0"
+description = "Vibe modding for Unreal Engine games and Cyberpunk 2077: run Lua live in a running game through UE4SS or Cyber Engine Tweaks, from a CLI or an MCP server"
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.9"
 authors = [{ name = "glitchbunny0" }]
-keywords = ["unreal-engine", "ue4ss", "modding", "mcp", "lua", "ai-agents"]
+keywords = ["unreal-engine", "ue4ss", "cyberpunk-2077", "cyber-engine-tweaks", "modding", "mcp", "lua", "ai-agents"]
 classifiers = ["Programming Language :: Python :: 3", "License :: OSI Approved :: MIT License"]
 dependencies = []
 
