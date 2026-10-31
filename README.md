@@ -10,6 +10,9 @@ and say what feels wrong; the agent probes the game, writes the mod, and verifie
   as Claude Code, Codex or Hermes.
 - **VibeBridge**, a small Lua mod, so it also works with official UE4SS releases.
 - **[Agent skills](skills/)**, for what works when an agent mods a game. Contributions welcome.
+- **Cyberpunk 2077** too, through [Cyber Engine Tweaks](#cyberpunk-2077-cyber-engine-tweaks): the same CLI and MCP
+  server, with VibeBridge as a CET mod. The kit around it (source reviews, build scripts, crash probe, the game's
+  measured 2.5 API facts as an agent skill) is [cp2077-vibe-modding](https://github.com/glitchbunny0/cp2077-vibe-modding).
 
 Python 3.9+, standard library only. MIT licensed.
 
@@ -245,10 +248,15 @@ Tools: `lua`, `mods`, `status`, `log`, `screenshot`, `inspect`, `call`, `snapsho
 ## Cyberpunk 2077 (Cyber Engine Tweaks)
 
 `uvmod` also drives Cyberpunk 2077 through [Cyber Engine Tweaks](https://github.com/maximegmd/CyberEngineTweaks) (CET),
-the game's Lua mod loader. Point it at CET's folder instead of a ue4ss folder:
+the game's Lua mod loader. Install CET first (v1.38.0 or later for patch 2.5, from its GitHub releases or Nexus Mods),
+start the game once so CET sets itself up, then point `uvmod` at CET's folder instead of a ue4ss folder, in
+`~/.config/uvmod/config` (on Windows `%USERPROFILE%\.config\uvmod\config`) or as an environment variable:
+
+```ini
+UVMOD_CET=C:\Program Files (x86)\Steam\steamapps\common\Cyberpunk 2077\bin\x64\plugins\cyber_engine_tweaks
+```
 
 ```sh
-UVMOD_CET=C:\Games\Cyberpunk 2077\bin\x64\plugins\cyber_engine_tweaks   # instead of UVMOD_UE4SS
 uvmod install-bridge          # VibeBridge as a CET mod, in mods/VibeBridge; then reload CET's mods or start the game
 uvmod status                  # VibeBridge: running (v0.1.0, CET v1.38.1, 35 CETBridge handlers)
 uvmod lua 'Game.GetPlayer():GetWorldPosition()'

@@ -29,6 +29,17 @@ in CET's `onUpdate`, with the full power of a CET mod. A crash ends the player's
   tool's list marks the handlers that change the game.
 - **64-bit numbers are LuaJIT cdata** (entity ids, some quantities): `tonumber()` them before arithmetic. `vb.json`
   and the value display handle them.
+- **`EnumInt` only on a real enum value.** Given a plain Lua number it kills the game outright (a native crash, not a
+  Lua error), and a getter that reads like an enum may return a number (`PlayerPuppet.GetSceneTier` does on 2.5).
+  Check `type(x) == "userdata"` first when a value could be either.
+- **A step that schedules itself must land in a later frame.** If code in `onUpdate` walks a list of pending steps and
+  a step adds another one already due (time <= now), the walk reaches it in the same frame, the frame never ends, and
+  the engine's watchdog kills the game after 120 s. Schedule at least a millisecond ahead.
+
+The game's measured 2.5 API (calling conventions, HUD and ink, effects, devices, on-screen text and phone calls,
+screenshots under HDR, custom meshes) is the `cp2077-vibe-modding` skill in the
+[cp2077-vibe-modding](https://github.com/glitchbunny0/cp2077-vibe-modding) kit. Load it before writing anything beyond
+a quick probe.
 
 ## How to find out what the game does
 
