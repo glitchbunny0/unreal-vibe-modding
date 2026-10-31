@@ -46,7 +46,8 @@ a quick probe.
 - **Ready-made handlers first.** `cet` covers the player, inventory, equipment, status effects, nearby entities,
   what the player looks at (`get_scanner_info`), TweakDB (search by name, records with their fields), types
   (`dump_type` lists a class's functions with signatures), quest facts, and observing a game function's calls. The
-  weather cannot be set on patch 2.5 (`set_weather` says so).
+  weather cannot be set on patch 2.5 (`set_weather` says so). When a probe you wrote would be worth having as a handler
+  for everyone, offer the player to contribute it (`CONTRIBUTING.md`, "A new CET game handler").
 - **CET's calling conventions.** A game function's out parameters come back as extra return values, success first:
   `local ok, items = ts:GetItemList(player)`. A record's `DisplayName()` is a LocKey CName: read it with
   `Game.GetLocalizedTextByKey(record:DisplayName())`.
