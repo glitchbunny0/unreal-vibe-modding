@@ -85,7 +85,15 @@ function Get-Game {{ if ($proc) {{ Get-Process -Name $proc -ErrorAction Silently
                 reader = threading.Thread(target=lambda: rest.append(proc.stdout.read()), daemon=True)
                 reader.start()
                 return proc, reader, rest
-            if not got_first.is_set() or proc.poll() in (None, 75):
+            code = proc.poll()
+            if got_first.is_set() and first[0] == b"" and code is None:
+                # Its stdout closed, so the session is ending: wait for the exit code instead of racing it, or a
+                # session that failed before GO (ssh refused, no PowerShell) is retried as one that never read.
+                try:
+                    code = proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    pass
+            if not got_first.is_set() or code in (None, 75):
                 self.retries += 1
                 proc.kill()
                 proc.wait()
