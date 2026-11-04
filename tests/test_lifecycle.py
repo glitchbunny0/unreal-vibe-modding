@@ -16,12 +16,14 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from fake_game import FakeGame  # noqa: E402
 from test_client import GameDir  # noqa: E402
-from uvmod import cli, journal  # noqa: E402
-from uvmod.config import Settings  # noqa: E402
-from uvmod.crash import parse_crash_context, parse_minidump  # noqa: E402
-from uvmod.game import Game  # noqa: E402
+from uvmod import cli  # noqa: E402
+from uvmod.core import journal  # noqa: E402
+from uvmod.core.config import Settings  # noqa: E402
+from uvmod.core.minidump import parse_minidump  # noqa: E402
+from uvmod.core.transports.local import LocalTransport  # noqa: E402
+from uvmod.crash import parse_crash_context  # noqa: E402
+from uvmod.game import INTERESTING, Game  # noqa: E402
 from uvmod.mcp import Server  # noqa: E402
-from uvmod.transports.local import LocalTransport  # noqa: E402
 
 GAME_BASE, UE4SS_BASE = 0x7FF600000000, 0x7FFA00000000
 
@@ -93,7 +95,7 @@ C:\\Game\\Binaries\\Win64\\ue4ss\\UE4SS.dll</Modules>
 class Readers(unittest.TestCase):
     def test_minidump(self):
         for memory64 in (False, True):
-            dump = parse_minidump(build_minidump(memory64=memory64))
+            dump = parse_minidump(build_minidump(memory64=memory64), INTERESTING)
             self.assertEqual(dump.code, 0xC0000005)
             self.assertEqual(dump.where(dump.address), ("UE4SS.dll", 0x2B56B3))
             self.assertEqual(dump.stack, [("UE4SS.dll", 0x2B5700), ("Game-Win64-Shipping.exe", 0x14B420C)])
@@ -103,8 +105,8 @@ class Readers(unittest.TestCase):
             self.assertIn("  UE4SS.dll+0x2B5700", text)
 
     def test_minidump_damaged(self):
-        self.assertIn("not a minidump", parse_minidump(b"PK\x03\x04junk").describe()[0])
-        outside = parse_minidump(build_minidump(address=0x790072, info=(8, 0x790072)))
+        self.assertIn("not a minidump", parse_minidump(b"PK\x03\x04junk", INTERESTING).describe()[0])
+        outside = parse_minidump(build_minidump(address=0x790072, info=(8, 0x790072)), INTERESTING)
         self.assertIn("at 0x790072 (outside every module)", outside.describe()[0])
         self.assertIn("executing address 0x790072", outside.describe()[1])
 

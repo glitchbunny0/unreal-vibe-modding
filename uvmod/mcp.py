@@ -10,13 +10,14 @@ import time
 import traceback
 from typing import Any
 
-from . import __version__, protocol
-from .config import ConfigError, Settings
+from . import __version__
+from .core import protocol
+from .core.config import ConfigError, Settings
 from .game import Game, GameError, timeout_message
 from .census import Census
 from .inputs import Input, press_key
 from .reflection import Inspector, render
-from .transports import TransportError
+from .core.transports import TransportError
 from .watch import LuaError, Watcher, render_events, render_wait, render_watches
 
 SUPPORTED_VERSIONS = ("2025-06-18", "2025-03-26", "2024-11-05")

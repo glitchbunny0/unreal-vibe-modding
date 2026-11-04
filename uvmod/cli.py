@@ -9,13 +9,14 @@ import sys
 import time
 from importlib import resources
 
-from . import __version__, journal, protocol
-from .config import KEYS, ConfigError, Settings
+from . import __version__
+from .core import journal, protocol
+from .core.config import KEYS, ConfigError, Settings
 from .game import UE_ONLY, Game, GameError, timeout_message
 from .census import Census
 from .inputs import Input, parse_value, press_key
 from .reflection import Inspector, parse_cli_args, render
-from .transports import TransportError
+from .core.transports import TransportError
 from .watch import LuaError, Watcher, render_events, render_wait, render_watches
 
 EXIT_OK, EXIT_LUA_ERROR, EXIT_USAGE, EXIT_NO_ANSWER, EXIT_NOT_MET = 0, 1, 2, 3, 4

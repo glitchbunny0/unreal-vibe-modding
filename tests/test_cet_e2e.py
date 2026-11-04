@@ -20,8 +20,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
-from uvmod import cet, cli, engines  # noqa: E402
-from uvmod.config import ConfigError, Settings  # noqa: E402
+from uvmod import cet, cli  # noqa: E402
+from uvmod.core import engine  # noqa: E402
+from uvmod.core.config import ConfigError, Settings  # noqa: E402
 from uvmod.game import Game, GameError  # noqa: E402
 from uvmod.mcp import Server, tools_for  # noqa: E402
 
@@ -68,7 +69,7 @@ class SettingsAndCatalog(unittest.TestCase):
         # The local transport cannot always read a process's start time (on Windows, not across sessions): status and
         # crash then name the process without a dangling "started".
         from unittest import mock
-        from uvmod.transports import Status
+        from uvmod.core.transports import Status
         d = CetDir()
         saved = {k: os.environ.get(k) for k in ENV_KEYS}
         os.environ.update(d.env)
@@ -105,9 +106,9 @@ class SettingsAndCatalog(unittest.TestCase):
             d.close()
 
     def test_engine_paths(self):
-        self.assertEqual(engines.CET.repl, "mods/VibeBridge/LuaRepl")
-        self.assertEqual(engines.UE4SS.repl, "LuaRepl")
-        self.assertEqual(engines.CET.process, "Cyberpunk2077")
+        self.assertEqual(engine.CET.repl, "mods/VibeBridge/LuaRepl")
+        self.assertEqual(engine.UE4SS.repl, "LuaRepl")
+        self.assertEqual(engine.CET.process, "Cyberpunk2077")
 
     def test_catalog_matches_the_lua_handlers(self):
         self.assertEqual(sorted(cet.HANDLERS), cet.lua_handlers())
@@ -128,7 +129,7 @@ class SettingsAndCatalog(unittest.TestCase):
         self.assertNotIn("console", game["inputSchema"]["properties"]["action"]["enum"])
 
     def test_capture_copies_only_the_game(self):
-        from uvmod import capture
+        from uvmod.core import capture
 
         script = capture.script("Cyber'punk", r"C:\T\shot.png", r"C:\T\shot.txt")
         # the foreground check comes before anything is copied from the screen

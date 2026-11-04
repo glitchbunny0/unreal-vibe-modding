@@ -15,7 +15,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Iterator
 
-from .. import engines, protocol
+from .. import engine, protocol
 from . import Exchange, Status, Transport, TransportError
 
 POLL = 0.01
@@ -290,7 +290,7 @@ class LocalTransport(Transport):
                              stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             return f"started: {self.settings.launch}"
         if self.settings.is_cet and os.name == "nt":
-            exe = self.root.joinpath(*engines.CET_EXE_FROM_ROOT).resolve()
+            exe = self.root.joinpath(*engine.CET_EXE_FROM_ROOT).resolve()
             if not exe.is_file():
                 raise TransportError(f"no game exe at {exe}; set UVMOD_LAUNCH to a command that starts the game")
             subprocess.Popen([str(exe)], cwd=str(exe.parent), stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
@@ -392,7 +392,7 @@ class LocalTransport(Transport):
     def press_keys(self, codes: list[int], hold_ms: int) -> str:
         if os.name != "nt":
             return super().press_keys(codes, hold_ms)
-        from ..keys import script
+        from ...keys import script
 
         import tempfile as _tempfile
 

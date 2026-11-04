@@ -10,9 +10,9 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-import uvmod.transports.ssh as ssh  # noqa: E402
-from uvmod.config import Settings  # noqa: E402
-from uvmod.transports import TransportError  # noqa: E402
+import uvmod.core.transports.ssh as ssh  # noqa: E402
+from uvmod.core.config import Settings  # noqa: E402
+from uvmod.core.transports import TransportError  # noqa: E402
 
 # Behaves like the bootstrap: reads one base64 line, says GO, "runs" the script by printing it back.
 # Per attempt (counted in a file), MODES[n] picks: ok, stall (never reads), exit75, fail (dies before GO).

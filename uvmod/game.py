@@ -10,9 +10,9 @@ import time
 from dataclasses import dataclass
 from typing import Any, Iterator
 
-from . import journal, protocol
-from .config import Settings
-from .transports import Status, Transport, make
+from .core import journal, protocol
+from .core.config import Settings
+from .core.transports import Status, Transport, make
 
 # Log lines `status` shows: the UE4SS version line, ExternalLuaRepl (not its per-request lines, which verbose
 # logging writes for every call), VibeBridge, hot-swap shells. Valid in Python and .NET regular expressions.
@@ -21,6 +21,10 @@ STATUS_PATTERN = r"UE4SS - v|\[ExternalLuaRepl\] (?!Request )|\[VibeBridge\]|loa
 CET_STATUS_PATTERN = r"\[VibeBridge\]|Mod .* (loaded|failed)|Ignoring mod|LuaVM: Reloaded|Tried to access invalid"
 
 UE_ONLY = "this needs UE4SS (an Unreal Engine game); with CET, use `lua` (Lua in VibeBridge) or `cet` (CETBridge's handlers)"
+
+# Module names whose addresses count as minidump stack frames (core leaves that choice to the caller): the mod
+# loader's dll, the game itself (a *-Shipping.exe), and a native code host.
+INTERESTING = ("ue4ss.dll", "shipping.exe", "main.dll")
 
 def screenshot_lua(ui: bool = True) -> str:
     """Lua that asks the engine for one screenshot. `shot` alone leaves every UI out (HUD, menus, an overlay);
@@ -288,7 +292,8 @@ return "ok"
     def crash_report(self, journal_count: int = 6) -> str:
         """Everything that says why the game died: is it running, the newest crash folder (Unreal's CrashContext and
         minidump), UE4SS's own crash dump, the end of UE4SS.log, and the last requests uvmod sent."""
-        from .crash import parse_crash_context, parse_minidump
+        from .crash import parse_crash_context
+        from .core.minidump import parse_minidump
 
         if self.settings.is_cet:
             return self._crash_report_cet(journal_count)
@@ -310,7 +315,7 @@ return "ok"
             try:
                 self.transport.fetch(path, local)
                 with open(local, "rb") as f:
-                    return parse_minidump(f.read()).describe()
+                    return parse_minidump(f.read(), INTERESTING).describe()
             except Exception as e:  # a damaged or locked dump should not hide the rest of the report
                 return [f"minidump: could not read {path}: {e}"]
 
@@ -363,7 +368,7 @@ return "ok"
     def _crash_report_cet(self, journal_count: int) -> str:
         """crash_report for Cyberpunk 2077: REDEngine's newest crash report (its stack trace, the head of report.txt and
         the minidump's exception), the end of CET's scripting.log, and the last requests uvmod sent."""
-        from .crash import parse_minidump
+        from .core.minidump import parse_minidump
 
         now = time.time()
         out: list[str] = []
@@ -395,7 +400,7 @@ return "ok"
                 try:
                     self.transport.fetch(f"{path}/{dmp}", local)
                     with open(local, "rb") as fh:
-                        out += parse_minidump(fh.read()).describe()[:16]
+                        out += parse_minidump(fh.read(), INTERESTING).describe()[:16]
                 except Exception as e:
                     out.append(f"minidump: could not read {path}/{dmp}: {e}")
                 finally:
