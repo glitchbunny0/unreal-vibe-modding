@@ -20,6 +20,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from fake_game import FakeGame  # noqa: E402
 from uvmod import cli  # noqa: E402
 from uvmod.core import protocol  # noqa: E402
+from uvmod.core.cli import status_text  # noqa: E402
 from uvmod.config import ConfigError, Settings  # noqa: E402
 from uvmod.core.session import GameError  # noqa: E402
 from uvmod.game import Game  # noqa: E402
@@ -268,6 +269,18 @@ class MissingFolderTests(unittest.TestCase):
             d.close()
 
 
+class StatusTextTests(unittest.TestCase):
+    def test_unknown_game_says_where_it_looked(self):
+        d = GameDir()
+        try:
+            (d.ue4ss.parent / "FakeGame-Win64-Shipping.exe").unlink()
+            body, _ = status_text(Game(d.settings()))
+            self.assertEqual(body.splitlines()[0],
+                             "game: unknown (no *-Shipping.exe beside the ue4ss folder; set UVMOD_PROCESS)")
+        finally:
+            d.close()
+
+
 class McpTests(unittest.TestCase):
     def setUp(self):
         self.dir = GameDir()
@@ -313,6 +326,10 @@ class McpTests(unittest.TestCase):
         self.assertEqual(self.rpc("tools/call", {"name": "nope"}, msg_id=6)["error"]["code"], -32602)
         self.assertEqual(self.rpc("bogus/method", msg_id=7)["error"]["code"], -32601)
         self.assertEqual(self.rpc("ping", msg_id=8)["result"], {})
+        # A tool that fails in the transport is a tool error, not a server error (input key needs Windows here).
+        reply = self.rpc("tools/call", {"name": "input", "arguments": {"action": "key", "name": "F1"}}, msg_id=10)
+        self.assertNotIn("error", reply)
+        self.assertTrue(reply["result"]["isError"])
         old = self.rpc("initialize", {"protocolVersion": "1999-01-01"}, msg_id=9)
         self.assertEqual(old["result"]["protocolVersion"], "2025-06-18")
 

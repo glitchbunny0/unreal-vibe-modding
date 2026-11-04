@@ -10,7 +10,8 @@ from importlib import resources
 from . import __version__
 from .config import CET_APP, UE4SS_APP, ConfigError, Settings
 from .core import protocol
-from .core.cli import EXIT_LUA_ERROR, EXIT_NO_ANSWER, EXIT_NOT_MET, EXIT_OK, EXIT_USAGE, add_generic, run_generic, status_text
+from .core.cli import (GENERIC_COMMANDS, EXIT_LUA_ERROR, EXIT_NO_ANSWER, EXIT_NOT_MET, EXIT_OK, EXIT_USAGE, add_generic,
+                       run_generic)
 from .core.config import keys_for
 from .core.session import GameError
 from .census import Census
@@ -137,12 +138,6 @@ Two things can answer inside the game; uvmod finds out which:
       with [Debug] ExternalLuaReplEnabled = 1 — runs code in any started Lua mod
   the VibeBridge mod, for official UE4SS builds — runs code in its own Lua state only
 """
-
-
-def cmd_status(game: Game) -> int:
-    body, rc = status_text(game)
-    print(body)
-    return rc
 
 
 def cmd_watch(watcher: Watcher, args) -> int:
@@ -435,8 +430,7 @@ def main(argv: list[str] | None = None) -> int:
             answer = game.query(args.handler, cet.parse_args(" ".join(args.args)), args.mod)
             print(cet.render(answer))
             return EXIT_OK if answer.get("ok") else EXIT_LUA_ERROR
-        if args.cmd in ("lua", "run", "mods", "status", "log", "follow", "push", "launch", "stop", "restart", "ready",
-                        "crash", "journal"):
+        if args.cmd in GENERIC_COMMANDS:
             return run_generic(game, args)
         if args.cmd == "swap":
             ok, text = game.swap(args.dir)

@@ -492,7 +492,7 @@ class Server(BaseServer):
             if action == "status":
                 return text(inp.status())
             if action == "key":
-                return text(press_key(game, str(args.get("name") or ""), int(args.get("hold_ms") or 150)))
+                return text(press_key(self.session(), str(args.get("name") or ""), int(args.get("hold_ms") or 150)))
             raise ValueError("action is list, press, stop, status or key")
         if name in ("inspect", "call", "snapshot"):
             return text(self._reflection(self.session(), name, args))

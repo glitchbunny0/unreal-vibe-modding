@@ -3,7 +3,6 @@ app's CLI has. The app's own cli.py adds its commands and its help text."""
 
 from __future__ import annotations
 
-import argparse
 import json
 import sys
 import time
@@ -29,7 +28,7 @@ def print_result(session, result, as_json: bool = False) -> int:
 
 def status_text(session) -> tuple[str, int]:
     """The status report: the text and its exit code. The lines that name the app's engine or loader come from
-    session.status_texts(st); the generic ones (the game and its log, the VibeBridge heartbeat, the REPL and the mod
+    session.status_texts(st) and session.bridge_facts() (asked only when there is a heartbeat); the generic ones (the game and its log, the VibeBridge heartbeat, the REPL and the mod
     that will run code) come from here."""
     st = session.status()
     texts = session.status_texts(st)
@@ -48,7 +47,7 @@ def status_text(session) -> tuple[str, int]:
     out += texts.get("before_bridge", [])
     if st.bridge_age is not None:
         state = "running" if st.bridge_age <= protocol.BRIDGE_FRESH_SECONDS else f"not running (last heartbeat {st.bridge_age:.0f} s ago)"
-        facts = texts.get("bridge_facts") or []
+        facts = session.bridge_facts()
         if facts:
             state += f" ({', '.join(facts)})"
         out.append(f"VibeBridge: {state}")

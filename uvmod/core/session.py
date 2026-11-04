@@ -53,10 +53,14 @@ class Session:
 
     def status_texts(self, st: Status) -> dict:
         """The status report's strings that name this app's engine or loader: `game_unknown` (the game line when its
-        process cannot be found), `before_bridge` and `after_bridge` (lines around the VibeBridge state),
-        `bridge_facts` (facts from its heartbeat), and `repl_missing` (the hint when the LuaRepl folder is absent).
-        The generic lines come from the status printer."""
+        process cannot be found), `before_bridge` and `after_bridge` (lines around the VibeBridge state), and
+        `repl_missing` (the hint when the LuaRepl folder is absent). The generic lines come from the status printer."""
         return {}
+
+    def bridge_facts(self) -> list[str]:
+        """Facts from the bridge's heartbeat shown after its state (e.g. the loader's version). Asked only when there is
+        a heartbeat, because reading it can cost a round trip to the game's machine."""
+        return []
 
     def request(self, request: dict[str, Any], timeout: float | None = None) -> Result:
         request_id = protocol.new_id()
