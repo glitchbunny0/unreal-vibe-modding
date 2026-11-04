@@ -53,6 +53,21 @@ class Game(Session):
             return timeout_message(delivery, seconds, cet=True)
         return timeout_message(delivery, seconds)
 
+    def status_texts(self, st) -> dict:
+        """The status lines that name UE4SS or the loader's ini, and — while it lives here — CET's heartbeat facts."""
+        if self.settings.is_cet:
+            # CET writes info lines to its logs only when a warning flushes them, so the heartbeat says more.
+            info = self.transport.bridge_info() or {}
+            facts = [f"v{info['version']}" if info.get("version") else "", f"CET {info['cet']}" if info.get("cet") else "",
+                     f"{info['handlers']} CETBridge handlers" if info.get("handlers") else ""]
+            return {"bridge_facts": [f for f in facts if f],
+                    "repl_missing": "repl: no LuaRepl folder in mods/VibeBridge (uvmod install-bridge)"}
+        hot = st.hot_reload_setting
+        warn = "  <- unsafe once any mod hooks Blueprint functions (hang or crash on reload)" if hot.replace(" ", "").endswith("=1") else ""
+        return {"before_bridge": [f"external REPL setting: {st.repl_setting or 'not in UE4SS-settings.ini (this UE4SS build has none)'}"],
+                "after_bridge": [f"hot reload: {hot or '?'}{warn}"],
+                "repl_missing": "repl: no LuaRepl folder (see: uvmod help)"}
+
     def screenshot(self, out: str | None = None, mod: str | None = None, ui: bool = True) -> str:
         """Take an engine screenshot, with the game's UI unless `ui` is false, copy it here, scale it to 1280 px wide if
         ffmpeg exists. Returns the path. With CET (no screenshot call of its own) the game's window is copied from the

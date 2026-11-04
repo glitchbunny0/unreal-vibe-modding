@@ -2,26 +2,15 @@
 
 from __future__ import annotations
 
-import base64
-import json
-import os
-import sys
-import time
-import traceback
 from typing import Any
 
 from . import __version__
 from .config import ConfigError, Settings
-from .core import protocol
+from .core.mcp import BaseServer, generic_tools, serve as serve_core, text
 from .core.session import GameError
-from .game import Game
-from .census import Census
-from .inputs import Input, press_key
-from .reflection import Inspector, render
 from .core.transports import TransportError
-from .watch import LuaError, Watcher, render_events, render_wait, render_watches
-
-SUPPORTED_VERSIONS = ("2025-06-18", "2025-03-26", "2024-11-05")
+from .game import Game
+from .watch import LuaError
 
 INSTRUCTIONS = """Drives a running Unreal Engine game through UE4SS: run Lua on the game thread, read the log, take screenshots,
 push mods. Start with `status`. Code runs with the full power of a mod, inside the player's game: a mistake can crash
@@ -320,11 +309,6 @@ TOOLS: list[dict[str, Any]] = [
     },
 ]
 
-
-def text(content: str, is_error: bool = False) -> dict[str, Any]:
-    return {"content": [{"type": "text", "text": content}], "isError": is_error}
-
-
 CET_INSTRUCTIONS = """Drives a running Cyberpunk 2077 through Cyber Engine Tweaks (the VibeBridge CET mod): run Lua in the game,
 call ready-made game handlers (`cet`), read CET's log, take screenshots of the game window, push CET mods. Start with
 `status`. Code runs with the full power of a CET mod inside the player's game: a mistake can crash or freeze it, and CET
@@ -341,6 +325,30 @@ Rules: limit_ms is not enforced (CET cannot interrupt Lua), so never loop withou
 menus and loading screens. 64-bit numbers are LuaJIT cdata (tonumber() them for maths). Observe/Override callbacks stay
 until CET reloads its mods: register them once and remember what you added."""
 
+# The texts of the generic tools for CET, as `generic_tools` wants them.
+CET_TEXTS: dict[str, Any] = {
+    "lua": CET_LUA_RULES,
+    "lua_limit_ms": "Checked but not enforced by CET; default 250.",
+    "lua_mod": "Mod whose Lua state runs the code (see `mods`). Default: UVMOD_MOD or the only mod.",
+    "mods": "Lists the mods whose Lua state `lua` can run code in.",
+    "status": "Is the game running, which REPL answers (UE4SS's own or the VibeBridge mod), the settings that matter.",
+    "log": "The last lines of CET's scripting.log (mods loading, their prints and errors), optionally only those matching a regular expression (case-insensitive).",
+    "screenshot": ("Copies the game's window from the screen as the player sees it (HUD and menus included) and returns "
+                   "the image. Look at the game yourself instead of asking the player to describe it. While another "
+                   "window is in front it refuses (the screen would show the player's other programs): ask the player "
+                   "to switch to the game."),
+    "screenshot_props": {},
+    "push": "Copies a CET mod folder (with init.lua) from this machine into CET's mods/ folder. CET loads it when it reloads its mods (overlay: Reload all mods) or at the next game start.",
+    "game": (
+        "Starts and stops the game, and finds out why it died. `launch` starts it (the game's exe, or the UVMOD_LAUNCH "
+        "command), `stop` ends its process, `restart` does both and waits until VibeBridge answers (that is how new "
+        "builds of CET mods with hooks load), `ready` waits for VibeBridge (up to `timeout_s`), `crash` reports why it "
+        "died: REDEngine's newest crash report (stack trace, report, the minidump's exception), the end of CET's "
+        "scripting.log, and the last requests sent from here (the one without an answer is the first suspect). After "
+        "a crash, read `crash` before restarting, and do not repeat the call that killed it."),
+    "game_actions": ["launch", "stop", "restart", "ready", "crash"],
+}
+
 
 def tools_for(engine: str) -> list[dict[str, Any]]:
     """The tools that work with this engine: everything for UE4SS; for CET the generic ones (with CET's wording) plus
@@ -349,38 +357,7 @@ def tools_for(engine: str) -> list[dict[str, Any]]:
         return TOOLS
     from . import cet
 
-    keep = ("lua", "mods", "status", "log", "screenshot", "push", "game")
-    out = []
-    for tool in TOOLS:
-        if tool["name"] not in keep:
-            continue
-        tool = json.loads(json.dumps(tool))
-        name = tool["name"]
-        if name == "lua":
-            tool["description"] = CET_LUA_RULES
-            tool["inputSchema"]["properties"]["limit_ms"]["description"] = "Checked but not enforced by CET; default 250."
-        elif name == "log":
-            tool["description"] = "The last lines of CET's scripting.log (mods loading, their prints and errors), optionally only those matching a regular expression (case-insensitive)."
-        elif name == "screenshot":
-            tool["description"] = ("Copies the game's window from the screen as the player sees it (HUD and menus included) and returns "
-                                   "the image. Look at the game yourself instead of asking the player to describe it. While another "
-                                   "window is in front it refuses (the screen would show the player's other programs): ask the player "
-                                   "to switch to the game.")
-            tool["inputSchema"] = {"type": "object", "properties": {}}
-        elif name == "push":
-            tool["description"] = "Copies a CET mod folder (with init.lua) from this machine into CET's mods/ folder. CET loads it when it reloads its mods (overlay: Reload all mods) or at the next game start."
-        elif name == "game":
-            tool["description"] = (
-                "Starts and stops the game, and finds out why it died. `launch` starts it (the game's exe, or the UVMOD_LAUNCH "
-                "command), `stop` ends its process, `restart` does both and waits until VibeBridge answers (that is how new "
-                "builds of CET mods with hooks load), `ready` waits for VibeBridge (up to `timeout_s`), `crash` reports why it "
-                "died: REDEngine's newest crash report (stack trace, report, the minidump's exception), the end of CET's "
-                "scripting.log, and the last requests sent from here (the one without an answer is the first suspect). After "
-                "a crash, read `crash` before restarting, and do not repeat the call that killed it.")
-            tool["inputSchema"]["properties"]["action"]["enum"] = ["launch", "stop", "restart", "ready", "crash"]
-            tool["inputSchema"]["properties"].pop("command", None)
-        out.append(tool)
-    out.append({
+    return generic_tools(CET_TEXTS) + [{
         "name": "cet",
         "description": ("Runs one of CETBridge's ready-made game handlers in the game and returns its result as JSON. "
                         "Handlers marked as changing the game change the player's game (and their save once it is saved): "
@@ -394,19 +371,24 @@ def tools_for(engine: str) -> list[dict[str, Any]]:
             },
             "required": ["handler"],
         },
-    })
-    return out
+    }]
 
 
-class Server:
+class Server(BaseServer):
+    name = "unreal-vibe-modding"
+    version = __version__
+    tool_errors = (LuaError, ConfigError, GameError, TransportError, ValueError, OSError, KeyError)
+
     def __init__(self):
-        self.game: Game | None = None
+        super().__init__()
         self._engine: str | None = None
 
-    def _game(self) -> Game:
-        if self.game is None:
-            self.game = Game(Settings.load())
-        return self.game
+    @property
+    def instructions(self) -> str:
+        return CET_INSTRUCTIONS if self.engine() == "cet" else INSTRUCTIONS
+
+    def make_session(self) -> Game:
+        return Game(Settings.load())
 
     def engine(self) -> str:
         """The engine the settings name; UE4SS when they cannot be read yet (the tools then say what is missing)."""
@@ -420,11 +402,16 @@ class Server:
     def tools(self) -> list[dict[str, Any]]:
         return tools_for(self.engine())
 
-    def call(self, name: str, args: dict[str, Any]) -> dict[str, Any]:
+    def tool_error(self, e: Exception) -> dict[str, Any]:
+        if isinstance(e, LuaError):
+            return text(f"ERROR: {e}", True)
+        return super().tool_error(e)
+
+    def call_extra(self, name: str, args: dict[str, Any]) -> dict[str, Any]:
         if name == "cet":
             from . import cet
 
-            answer = self._game().query(str(args.get("handler") or ""), args.get("args") or {}, args.get("mod") or None)
+            answer = self.session().query(str(args.get("handler") or ""), args.get("args") or {}, args.get("mod") or None)
             return text(cet.render(answer), not answer.get("ok"))
         if name == "api" and args.get("action") in ("notes", "note"):
             from . import notes
@@ -449,48 +436,10 @@ class Server:
                                        int(args.get("limit") or 40), bool(args.get("inherited"))))
             finally:
                 ix.close()
-        game = self._game()
-        if name in ("lua", "mods"):
-            if name == "lua":
-                result = game.exec(str(args.get("code", "")), args.get("mod") or None, args.get("limit_ms"))
-            else:
-                result = game.mods()
-            if result.answer is None:
-                return text(game.no_answer(result.delivery), True)
-            via = "VibeBridge" if result.delivery == "bridge" else "UE4SS"
-            in_game = f"{result.answer['elapsed_ms']:.2f} ms in the game, " if "elapsed_ms" in result.answer else ""
-            footer = f"\n({via}, {in_game}{result.elapsed_s * 1000:.0f} ms round trip)"
-            return text(protocol.render_text(result.answer) + footer, not result.answer.get("ok"))
-        if name == "status":
-            from io import StringIO
-            from contextlib import redirect_stdout
-            from .cli import cmd_status
-
-            buf = StringIO()
-            with redirect_stdout(buf):
-                rc = cmd_status(game)
-            return text(buf.getvalue().rstrip(), rc != 0)
-        if name == "log":
-            lines = game.log(int(args.get("lines") or 40), str(args.get("pattern") or ""))
-            return text("\n".join(lines) or "(no matching lines)")
-        if name == "screenshot":
-            ui = args.get("ui") is not False
-            if args.get("burst"):
-                path = game.burst(int(args["burst"]), int(args.get("every_ms") or 750), mod=args.get("mod") or None, ui=ui)
-                if os.path.isdir(path):
-                    return text(f"no ffmpeg here to tile them; the frames are in {path}")
-                got, asked = game.last_burst
-                note = f"{got} of {asked} frames, numbered in order"
-            else:
-                path = game.screenshot(mod=args.get("mod") or None, ui=ui)
-                note = ""
-            with open(path, "rb") as f:
-                data = base64.b64encode(f.read()).decode("ascii")
-            mime = "image/png" if path.endswith(".png") else "image/jpeg"
-            caption = f"saved: {path}" + (f" ({note})" if note else "")
-            return {"content": [{"type": "image", "data": data, "mimeType": mime}, {"type": "text", "text": caption}], "isError": False}
         if name in ("watch", "events", "wait", "unwatch"):
-            watcher = Watcher(game, args.get("mod") or None)
+            from .watch import Watcher, render_events, render_wait, render_watches
+
+            watcher = Watcher(self.session(), args.get("mod") or None)
             if name == "watch":
                 batch = watcher.watch(str(args["function"]), args.get("id") or None, args.get("capture") or None,
                                       bool(args.get("post")), int(args.get("limit") or 200))
@@ -504,34 +453,13 @@ class Server:
             met, result, seconds = watcher.wait(args.get("for") or None, int(args.get("count") or 1),
                                                 args.get("until") or None, timeout)
             return text(render_wait(met, result, seconds))
-        if name == "push":
-            return text(game.push(str(args["dir"])))
         if name == "swap":
-            ok, answer = game.swap(str(args["dir"]))
+            ok, answer = self.session().swap(str(args["dir"]))
             return text(answer, not ok)
-        if name == "game":
-            action = args.get("action")
-            timeout = float(args.get("timeout_s") or 180)
-            if action == "launch":
-                return text(game.launch())
-            if action == "stop":
-                return text(game.stop())
-            if action == "crash":
-                return text(game.crash_report())
-            if action == "console":
-                return text(game.console(str(args.get("command") or "")))
-            if action in ("ready", "restart"):
-                lines = []
-                if action == "restart":
-                    lines.append(game.stop())
-                    time.sleep(2.0)
-                    lines.append(game.launch())
-                    time.sleep(10.0)
-                ok, answer = game.ready(timeout)
-                return text("\n".join(lines + [answer]), not ok)
-            raise ValueError("action is launch, stop, restart, ready, crash or console")
         if name == "calls":
-            census = Census(game, args.get("mod") or None)
+            from .census import Census
+
+            census = Census(self.session(), args.get("mod") or None)
             action = args.get("action")
             refs = [str(r) for r in (args.get("refs") or [])]
             if action == "discover":
@@ -549,7 +477,9 @@ class Server:
                 return text(census.stop())
             raise ValueError("action is discover, start, mark, compare or stop")
         if name == "input":
-            inp = Input(game, args.get("mod") or None)
+            from .inputs import Input, press_key
+
+            inp = Input(self.session(), args.get("mod") or None)
             action = args.get("action")
             if action == "list":
                 return text(inp.list(args.get("name") or None))
@@ -565,11 +495,13 @@ class Server:
                 return text(press_key(game, str(args.get("name") or ""), int(args.get("hold_ms") or 150)))
             raise ValueError("action is list, press, stop, status or key")
         if name in ("inspect", "call", "snapshot"):
-            return text(self._reflection(game, name, args))
+            return text(self._reflection(self.session(), name, args))
         raise KeyError(name)
 
     @staticmethod
     def _reflection(game: Game, name: str, args: dict[str, Any]) -> str:
+        from .reflection import Inspector, render
+
         insp = Inspector(game, args.get("mod") or None)
         limit = args.get("limit")
         if name == "call":
@@ -609,58 +541,6 @@ class Server:
             return render("target", insp.target(float(args.get("distance") or 5000), args.get("ref") or None))
         raise ValueError("what is world, find, props, functions, signature, classes or target")
 
-    def handle(self, msg: dict[str, Any]) -> dict[str, Any] | None:
-        method, msg_id = msg.get("method"), msg.get("id")
-        if msg_id is None:  # a notification: nothing to answer
-            return None
-        try:
-            if method == "initialize":
-                requested = (msg.get("params") or {}).get("protocolVersion")
-                version = requested if requested in SUPPORTED_VERSIONS else SUPPORTED_VERSIONS[0]
-                result = {
-                    "protocolVersion": version,
-                    "capabilities": {"tools": {}},
-                    "serverInfo": {"name": "unreal-vibe-modding", "version": __version__},
-                    "instructions": CET_INSTRUCTIONS if self.engine() == "cet" else INSTRUCTIONS,
-                }
-            elif method == "ping":
-                result = {}
-            elif method == "tools/list":
-                result = {"tools": self.tools()}
-            elif method == "tools/call":
-                params = msg.get("params") or {}
-                name = params.get("name", "")
-                if name not in {t["name"] for t in self.tools()}:
-                    return {"jsonrpc": "2.0", "id": msg_id, "error": {"code": -32602, "message": f"unknown tool: {name}"}}
-                try:
-                    result = self.call(name, params.get("arguments") or {})
-                except LuaError as e:
-                    result = text(f"ERROR: {e}", True)
-                except (ConfigError, GameError, TransportError, ValueError, OSError, KeyError) as e:
-                    result = text(f"{type(e).__name__}: {e}", True)
-            else:
-                return {"jsonrpc": "2.0", "id": msg_id, "error": {"code": -32601, "message": f"method not found: {method}"}}
-        except Exception as e:  # never let one request take the server down
-            traceback.print_exc(file=sys.stderr)
-            return {"jsonrpc": "2.0", "id": msg_id, "error": {"code": -32603, "message": str(e)}}
-        return {"jsonrpc": "2.0", "id": msg_id, "result": result}
-
 
 def serve() -> int:
-    server = Server()
-    stdin = sys.stdin
-    out = sys.stdout
-    for line in stdin:
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            msg = json.loads(line)
-        except ValueError:
-            reply = {"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "parse error"}}
-        else:
-            reply = server.handle(msg) if isinstance(msg, dict) else None
-        if reply is not None:
-            out.write(json.dumps(reply, ensure_ascii=False) + "\n")
-            out.flush()
-    return 0
+    return serve_core(Server())

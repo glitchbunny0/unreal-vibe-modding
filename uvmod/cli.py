@@ -3,25 +3,22 @@
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import sys
-import time
 from importlib import resources
 
 from . import __version__
 from .config import CET_APP, UE4SS_APP, ConfigError, Settings
-from .core import journal, protocol
+from .core import protocol
+from .core.cli import EXIT_LUA_ERROR, EXIT_NO_ANSWER, EXIT_NOT_MET, EXIT_OK, EXIT_USAGE, add_generic, run_generic, status_text
 from .core.config import keys_for
 from .core.session import GameError
-from .game import UE_ONLY, Game, timeout_message
 from .census import Census
+from .game import UE_ONLY, Game
 from .inputs import Input, parse_value, press_key
 from .reflection import Inspector, parse_cli_args, render
 from .core.transports import TransportError
 from .watch import LuaError, Watcher, render_events, render_wait, render_watches
-
-EXIT_OK, EXIT_LUA_ERROR, EXIT_USAGE, EXIT_NO_ANSWER, EXIT_NOT_MET = 0, 1, 2, 3, 4
 
 
 def _settings_help() -> list[tuple[str, str]]:
@@ -142,69 +139,10 @@ Two things can answer inside the game; uvmod finds out which:
 """
 
 
-def print_result(result, as_json: bool, timeout: float, cet: bool = False) -> int:
-    if result.answer is None:
-        print(timeout_message(result.delivery, timeout, cet))
-        return EXIT_NO_ANSWER
-    if as_json:
-        print(json.dumps(dict(result.answer, delivery=result.delivery), ensure_ascii=False))
-    else:
-        print(protocol.render_text(result.answer))
-    return EXIT_OK if result.answer.get("ok") else EXIT_LUA_ERROR
-
-
 def cmd_status(game: Game) -> int:
-    s = game.status()
-    cet = game.settings.is_cet
-    if s.running is None:
-        print("game: unknown (no *-Shipping.exe beside the ue4ss folder; set UVMOD_PROCESS)")
-    elif s.running:
-        print(f"game: running ({s.process}, pid {s.pid}" + (f", started {s.started}" if s.started else "") + ")")
-    else:
-        print(f"game: not running ({s.process})")
-    if s.log_time:
-        print(f"log: {s.log_time}")
-        for line in s.log_lines:
-            print(f"  {line}")
-    if not cet:
-        print(f"external REPL setting: {s.repl_setting or 'not in UE4SS-settings.ini (this UE4SS build has none)'}")
-    if s.bridge_age is not None:
-        state = "running" if s.bridge_age <= protocol.BRIDGE_FRESH_SECONDS else f"not running (last heartbeat {s.bridge_age:.0f} s ago)"
-        if cet:
-            # CET writes info lines to its logs only when a warning flushes them, so the heartbeat says more.
-            info = game.transport.bridge_info() or {}
-            facts = [f"v{info['version']}" if info.get("version") else "", f"CET {info['cet']}" if info.get("cet") else "",
-                     f"{info['handlers']} CETBridge handlers" if info.get("handlers") else ""]
-            state += f" ({', '.join(f for f in facts if f)})" if any(facts) else ""
-        print(f"VibeBridge: {state}")
-    else:
-        print(f"VibeBridge: {'installed, no heartbeat yet' if s.bridge_installed else 'not installed'}")
-    if not cet:
-        hr = s.hot_reload_setting
-        warn = "  <- unsafe once any mod hooks Blueprint functions (hang or crash on reload)" if hr.replace(" ", "").endswith("=1") else ""
-        print(f"hot reload: {hr or '?'}{warn}")
-    if not s.repl_folder:
-        print("repl: no LuaRepl folder in mods/VibeBridge (uvmod install-bridge)" if cet else "repl: no LuaRepl folder (see: uvmod help)")
-        return EXIT_NO_ANSWER
-    saved, game.settings.timeout = game.settings.timeout, min(game.settings.timeout, 3.0)
-    try:
-        listed = game.mods()
-    finally:
-        game.settings.timeout = saved
-    if listed.answer and listed.answer.get("ok"):
-        who = "VibeBridge" if listed.delivery == "bridge" else "UE4SS external REPL"
-        print(f"repl: {who} answering in {listed.elapsed_s * 1000:.0f} ms; mods: {', '.join(listed.answer['mods'])}")
-        mods = listed.answer["mods"]
-        if game.settings.mod:
-            target = game.settings.mod + ("" if game.settings.mod in mods else "  <- not among the mods above")
-        elif len(mods) == 1:
-            target = f"{mods[0]} (the only mod)"
-        else:
-            target = "none set: pass --mod or set UVMOD_MOD to one of the mods above"
-        print(f"target: {target}")
-        return EXIT_OK
-    print(f"repl: not answering ({game.no_answer(listed.delivery, 3.0)})")
-    return EXIT_NO_ANSWER
+    body, rc = status_text(game)
+    print(body)
+    return rc
 
 
 def cmd_watch(watcher: Watcher, args) -> int:
@@ -356,23 +294,7 @@ def main(argv: list[str] | None = None) -> int:
 
     parser = argparse.ArgumentParser(prog="uvmod", add_help=False)
     sub = parser.add_subparsers(dest="cmd")
-    for name in ("lua", "run", "mods"):
-        p = sub.add_parser(name)
-        if name == "lua":
-            p.add_argument("code")
-        if name == "run":
-            p.add_argument("file", nargs="?", default="-")
-        p.add_argument("--mod")
-        p.add_argument("--limit", type=int)
-        p.add_argument("--json", action="store_true")
-    sub.add_parser("status")
-    p = sub.add_parser("log")
-    p.add_argument("lines", nargs="?", type=int, default=40)
-    p.add_argument("pattern", nargs="?", default="")
-    p = sub.add_parser("follow")
-    p.add_argument("pattern", nargs="?", default="")
-    for name in ("push", "swap"):
-        sub.add_parser(name).add_argument("dir")
+    add_generic(sub)
     p = sub.add_parser("shot")
     p.add_argument("out", nargs="?")
     p.add_argument("--mod")
@@ -473,15 +395,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("name")
     p.add_argument("--dir", default=".")
     sub.add_parser("mock").add_argument("project", nargs="?", default=".")
-    sub.add_parser("launch")
-    sub.add_parser("stop")
-    for name in ("ready", "restart"):
-        sub.add_parser(name).add_argument("--timeout", type=float, default=180.0)
-    sub.add_parser("crash")
+    sub.add_parser("swap").add_argument("dir")
     p = sub.add_parser("console")
     p.add_argument("command")
     p.add_argument("--mod")
-    sub.add_parser("journal").add_argument("count", nargs="?", type=int, default=10)
     sub.add_parser("install-bridge")
     p = sub.add_parser("cet")
     p.add_argument("handler", nargs="?")
@@ -518,26 +435,9 @@ def main(argv: list[str] | None = None) -> int:
             answer = game.query(args.handler, cet.parse_args(" ".join(args.args)), args.mod)
             print(cet.render(answer))
             return EXIT_OK if answer.get("ok") else EXIT_LUA_ERROR
-        if args.cmd in ("lua", "run"):
-            code = args.code if args.cmd == "lua" else (sys.stdin.read() if args.file == "-" else open(args.file, encoding="utf-8").read())
-            return print_result(game.exec(code, args.mod, args.limit), args.json, game.settings.timeout, game.settings.is_cet)
-        if args.cmd == "mods":
-            return print_result(game.mods(), args.json, game.settings.timeout, game.settings.is_cet)
-        if args.cmd == "status":
-            return cmd_status(game)
-        if args.cmd == "log":
-            print("\n".join(game.log(args.lines, args.pattern)))
-            return EXIT_OK
-        if args.cmd == "follow":
-            try:
-                for line in game.follow(args.pattern):
-                    print(line, flush=True)
-            except KeyboardInterrupt:
-                pass
-            return EXIT_OK
-        if args.cmd == "push":
-            print(game.push(args.dir))
-            return EXIT_OK
+        if args.cmd in ("lua", "run", "mods", "status", "log", "follow", "push", "launch", "stop", "restart", "ready",
+                        "crash", "journal"):
+            return run_generic(game, args)
         if args.cmd == "swap":
             ok, text = game.swap(args.dir)
             print(text)
@@ -594,29 +494,8 @@ def main(argv: list[str] | None = None) -> int:
 
             print(notes.add(game.settings.root, " ".join(args.text)) if args.action == "add" else notes.read(game.settings.root))
             return EXIT_OK
-        if args.cmd == "launch":
-            print(game.launch())
-            return EXIT_OK
-        if args.cmd == "stop":
-            print(game.stop())
-            return EXIT_OK
-        if args.cmd in ("ready", "restart"):
-            if args.cmd == "restart":
-                print(game.stop())
-                time.sleep(2.0)
-                print(game.launch())
-                time.sleep(10.0)  # the old UE4SS.log and LuaRepl folder are still there for a few seconds
-            ok, text = game.ready(args.timeout)
-            print(text)
-            return EXIT_OK if ok else EXIT_NO_ANSWER
         if args.cmd == "console":
             print(game.console(args.command, args.mod))
-            return EXIT_OK
-        if args.cmd == "crash":
-            print(game.crash_report())
-            return EXIT_OK
-        if args.cmd == "journal":
-            print(journal.render(journal.tail(game.settings, args.count)))
             return EXIT_OK
         if args.cmd == "install-bridge":
             engine = game.transport.engine
