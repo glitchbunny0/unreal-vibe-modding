@@ -8,26 +8,18 @@ import sys
 from importlib import resources
 
 from . import __version__
-from .config import CET_APP, UE4SS_APP, ConfigError, Settings
+from .config import UE4SS_APP, ConfigError, Settings
 from .core import protocol
 from .core.cli import (GENERIC_COMMANDS, EXIT_LUA_ERROR, EXIT_NO_ANSWER, EXIT_NOT_MET, EXIT_OK, EXIT_USAGE, add_generic,
                        run_generic)
 from .core.config import keys_for
 from .core.session import GameError
 from .census import Census
-from .game import UE_ONLY, Game
+from .game import Game
 from .inputs import Input, parse_value, press_key
 from .reflection import Inspector, parse_cli_args, render
 from .core.transports import TransportError
 from .watch import LuaError, Watcher, render_events, render_wait, render_watches
-
-
-def _settings_help() -> list[tuple[str, str]]:
-    """(KEY, help) pairs for the help text: UE4SS's root first, then CET's (as the list has always read), then the
-    shared keys with the app's extra ones in their place (see keys_for)."""
-    items = list(keys_for(UE4SS_APP).items())
-    items.insert(1, next(iter(keys_for(CET_APP).items())))  # keys_for puts the app's root key first
-    return items
 
 HELP = f"""uvmod {__version__} — vibe modding for Unreal Engine games: run Lua live in a running game through UE4SS.
 
@@ -115,22 +107,12 @@ The game itself
   uvmod ps < script.ps1                     run PowerShell on the game box (ssh transport)
   uvmod mcp                                 MCP server on stdio, for AI agents
 
-Cyberpunk 2077 (Cyber Engine Tweaks: set UVMOD_CET instead of UVMOD_UE4SS)
-  uvmod install-bridge                      install VibeBridge as a CET mod; then reload CET's mods (overlay: Reload all
-        mods) or start the game. Lua runs in VibeBridge's environment (LuaJIT, CET's sandbox and API: Game, GetPlayer,
-        TweakDB, Observe, ...); `vb.json(value)` gives JSON for any value. CET cannot stop a request: no endless loops
-  uvmod cet [HANDLER [ARGS]]                CETBridge's game handlers: player_info, game_state, get_inventory,
-        teleport, ... (no HANDLER: the list). ARGS: a JSON object or key=value pairs
-  lua, run, mods, status, log (CET's scripting.log), follow, push (into mods/), shot (the game window, copied from
-        the screen), launch, stop, restart, ready, crash (REDEngine's crash report), journal and mcp work too; the
-        Unreal reflection, input, calls, watch, index and console commands do not
-
   lua/run/mods take --mod NAME, --limit MS (1-5000) and --json (print the raw answer); the watch commands
   take --mod too (watches live in that mod's Lua state).
   Exit codes: 0 OK, 1 the Lua raised an error, 2 usage or settings, 3 nothing answered, 4 wait timed out.
 
 Settings come from the environment or from the config file (KEY=value lines; the environment wins):
-""" + "\n".join(f"  {k:<16} {v}" for k, v in _settings_help()) + """
+""" + "\n".join(f"  {k:<16} {v}" for k, v in keys_for(UE4SS_APP).items()) + """
   UVMOD_CONFIG     another config file path
 
 Two things can answer inside the game; uvmod finds out which:
@@ -158,15 +140,11 @@ def cmd_watch(watcher: Watcher, args) -> int:
     return EXIT_OK
 
 
-def bridge_dir(engine: str = "ue4ss") -> str:
-    if engine == "cet":
-        return str(resources.files("uvmod") / "bridge" / "cet" / "VibeBridge")
+def bridge_dir() -> str:
     return str(resources.files("uvmod") / "bridge" / "VibeBridge")
 
 
 REFLECTION_COMMANDS = ("world", "find", "props", "funcs", "sig", "classes", "call", "snap", "diff", "snaps", "forget", "target")
-# What only UE4SS can do (Unreal reflection, Enhanced Input, Blueprint hooks, DumpJMAP, the engine console).
-UE_ONLY_COMMANDS = REFLECTION_COMMANDS + ("watch", "unwatch", "events", "wait", "watches", "calls", "index", "console")
 
 
 def cmd_reflection(insp: Inspector, args) -> int:
@@ -395,10 +373,6 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("command")
     p.add_argument("--mod")
     sub.add_parser("install-bridge")
-    p = sub.add_parser("cet")
-    p.add_argument("handler", nargs="?")
-    p.add_argument("args", nargs="*")
-    p.add_argument("--mod")
     sub.add_parser("ps")
     sub.add_parser("mcp")
     try:
@@ -416,20 +390,6 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         game = Game(Settings.load())
-        if game.settings.is_cet and (args.cmd in UE_ONLY_COMMANDS or (args.cmd == "input" and args.action != "key")):
-            print(f"uvmod: {args.cmd}: {UE_ONLY}", file=sys.stderr)
-            return EXIT_USAGE
-        if args.cmd == "cet":
-            from . import cet
-
-            if not args.handler:
-                print(cet.catalog())
-                return EXIT_OK
-            if not game.settings.is_cet:
-                raise GameError("CETBridge's handlers need Cyberpunk 2077 with CET (set UVMOD_CET)")
-            answer = game.query(args.handler, cet.parse_args(" ".join(args.args)), args.mod)
-            print(cet.render(answer))
-            return EXIT_OK if answer.get("ok") else EXIT_LUA_ERROR
         if args.cmd in GENERIC_COMMANDS:
             return run_generic(game, args)
         if args.cmd == "swap":
@@ -493,15 +453,10 @@ def main(argv: list[str] | None = None) -> int:
             return EXIT_OK
         if args.cmd == "install-bridge":
             engine = game.transport.engine
-            print(game.push(bridge_dir(engine.name)))
+            print(game.push(bridge_dir()))
             game.transport.make_folder(engine.repl)
-            if game.settings.is_cet:
-                print(f"created {engine.repl}/. VibeBridge loads when CET loads its mods: reload them in CET's overlay "
-                      "(Reload all mods) or start the game. DEVELOPMENT ONLY: whatever can write to that folder runs Lua "
-                      "in the game.")
-            else:
-                print(f"created {protocol.FOLDER}/. VibeBridge loads at the next game start; it stays idle if this UE4SS has its "
-                      "external REPL turned on.")
+            print(f"created {protocol.FOLDER}/. VibeBridge loads at the next game start; it stays idle if this UE4SS has its "
+                  "external REPL turned on.")
             return EXIT_OK
         if args.cmd == "ps":
             print(game.transport.powershell(sys.stdin.read()), end="")

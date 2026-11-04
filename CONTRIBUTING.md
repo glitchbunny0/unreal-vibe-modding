@@ -18,7 +18,7 @@ and the reason for it:
 - **Write rules, not stories.** "Check `IsValid()` before using an object you got earlier", followed by why. Leave
   out the incident narrative.
 - **Keep game-specific knowledge in a skill of its own**, for example `skills/<game>/SKILL.md`, and keep
-  `skills/unreal-vibe-modding` and `skills/cet-vibe-modding` about driving the engine with uvmod.
+  `skills/unreal-vibe-modding` and `skills/cet-vibe-modding` about driving the engine (with uvmod and cetmod).
 - **Use the [Agent Skills](https://agentskills.io) format:** one folder per skill, a `SKILL.md` with `name` and
   `description` in its front matter, and supporting files beside it.
 
@@ -27,14 +27,14 @@ and the reason for it:
 - The client is Python 3.9+ with the standard library only; keep it that way.
 - VibeBridge for UE4SS is plain Lua 5.4 with no dependencies. Logic goes in `vibebridge_core.lua`, which the tests run
   outside a game. UE4SS wiring goes in `main.lua`.
-- VibeBridge for CET (`uvmod/bridge/cet/VibeBridge/`) runs under CET's LuaJIT. `tests/fake_cet.lua` stands in for CET's
+- VibeBridge for CET (`cetmod/bridge/VibeBridge/`) runs under CET's LuaJIT. `tests/fake_cet.lua` stands in for CET's
   sandbox; the tests run it under Lua 5.4 and, with `pip install lupa`, under LuaJIT too. Install lupa before a pull
   request that touches it: CI runs both.
-- **A new CET game handler** (a ready-made call behind `uvmod cet NAME` and the MCP tool `cet`):
+- **A new CET game handler** (a ready-made call behind `cetmod query NAME` and the MCP tool `query`):
   1. Write it in `cetbridge_fixes.lua` as `handlers.<name> = function(args) ... end`, beside `overview`. Leave
      `handlers.lua` unmodified: it is CETBridge's upstream file. Wrap game calls in `try`/`pcall` so a missing field
      returns `nil` instead of an error.
-  2. Describe it in `uvmod/cet.py`, under `READS` if it changes nothing in the game, under `CHANGES` if it does (the
+  2. Describe it in `cetmod/handlers.py`, under `READS` if it changes nothing in the game, under `CHANGES` if it does (the
      MCP tool tells the agent to ask the player before a change). `test_catalog_matches_the_lua_handlers` fails until
      both sides agree.
   3. Give `tests/fake_cet.lua` what the handler calls and add a case to `tests/test_cet_e2e.py`.
@@ -47,10 +47,10 @@ and the reason for it:
 
 ## Reports from real games
 
-Tell us which game and which mod loader: for Unreal games the UE version, the UE4SS build and which REPL answered; for
-Cyberpunk 2077 the game patch, the CET version and the store (Steam, GOG, Epic). Include `uvmod status` and the log
-lines (`uvmod log 100`). If the game crashed or froze, include `uvmod crash` and, for Unreal games, UE4SS's crash dump if
-there is one.
+Tell us which game and which mod loader: for Unreal games the UE version, the UE4SS build and which REPL answered (include
+`uvmod status`, `uvmod log 100`, and `uvmod crash` if the game crashed or froze, with UE4SS's crash dump if there is one);
+for Cyberpunk 2077 the game patch, the CET version and the store (Steam, GOG, Epic), with `cetmod status`, `cetmod log 100`
+and `cetmod crash` the same way.
 
 ## What does not belong here
 

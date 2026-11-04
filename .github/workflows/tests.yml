@@ -20,7 +20,7 @@ jobs:
       - name: LuaJIT (CET's Lua), through lupa
         run: pip install lupa
       - name: Bridge syntax
-        run: for f in uvmod/bridge/VibeBridge/Scripts/*.lua uvmod/bridge/cet/VibeBridge/*.lua tests/*.lua; do luac5.4 -p "$f"; done
+        run: for f in uvmod/bridge/VibeBridge/Scripts/*.lua cetmod/bridge/VibeBridge/*.lua tests/*.lua; do luac5.4 -p "$f"; done
       - name: Client and bridge, end to end
         run: LUA=lua5.4 python -m unittest discover -s tests -v
       - name: Installs, and refuses cleanly without settings
@@ -28,10 +28,12 @@ jobs:
           pip install .
           uvmod help | grep -q 'uvmod mcp'
           out="$(UVMOD_CONFIG=/nonexistent uvmod status 2>&1)" && exit 1
-          grep -q 'neither UVMOD_UE4SS nor UVMOD_CET is set' <<<"$out"
-          out="$(UVMOD_CONFIG=/nonexistent UVMOD_CET=/nonexistent uvmod status 2>&1)" && exit 1
-          grep -q 'UVMOD_CET is not a folder' <<<"$out"
+          grep -q 'UVMOD_UE4SS is not set' <<<"$out"
           pkg="$(python -c 'import uvmod, os; print(os.path.dirname(uvmod.__file__))')"
           test -f "$pkg/bridge/VibeBridge/Scripts/main.lua"
-          test -f "$pkg/bridge/cet/VibeBridge/init.lua"
-          test -f "$pkg/bridge/cet/VibeBridge/LICENSE.CETBridge"
+      - name: cetmod (from the checkout) refuses cleanly without settings
+        run: |
+          out="$(CETMOD_CONFIG=/nonexistent python -m cetmod status 2>&1)" && exit 1
+          grep -q 'CETMOD_CET is not set' <<<"$out"
+          out="$(CETMOD_CONFIG=/nonexistent CETMOD_CET=/nonexistent python -m cetmod status 2>&1)" && exit 1
+          grep -q 'CETMOD_CET is not a folder' <<<"$out"

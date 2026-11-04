@@ -1,5 +1,5 @@
-"""The app's game: UE4SS in an Unreal Engine game, and — until it moves out for good — the branches for Cyber Engine
-Tweaks, each a single `if self.settings.is_cet:` delegating to a function of its own, so they can be lifted out whole."""
+"""The app's game: UE4SS in an Unreal Engine game. The parts every app shares come from core's Session; what only the
+engine can do (screenshots through it, console commands, the reflection index, the UE crash report) lives here."""
 
 from __future__ import annotations
 
@@ -12,8 +12,6 @@ import time
 from .core import journal, protocol
 from .core.protocol import lua_string
 from .core.session import GameError, Session
-
-UE_ONLY = "this needs UE4SS (an Unreal Engine game); with CET, use `lua` (Lua in VibeBridge) or `cet` (CETBridge's handlers)"
 
 # Module names whose addresses count as minidump stack frames (core leaves that choice to the caller): the mod
 # loader's dll, the game itself (a *-Shipping.exe), and a native code host.
@@ -28,16 +26,7 @@ def screenshot_lua(ui: bool = True) -> str:
             'return "ok"')
 
 
-def timeout_message(delivery: str, seconds: float, cet: bool = False) -> str:
-    if cet:
-        if delivery == "missing":
-            return ("NO BRIDGE: CET's mods/VibeBridge/LuaRepl folder is missing. Install VibeBridge (uvmod install-bridge), "
-                    "then reload CET's mods (overlay: Reload all mods) or start the game.")
-        if delivery == "bridge":
-            return (f"TIMEOUT after {seconds:g}s: VibeBridge did not answer (the game may be loading or stuck, or a request "
-                    "that never ends is running: CET cannot stop one).")
-        return (f"TIMEOUT after {seconds:g}s: nothing answered. The game is not running, or VibeBridge is not loaded "
-                "(reload CET's mods after installing it; see: uvmod status).")
+def timeout_message(delivery: str, seconds: float) -> str:
     if delivery == "missing":
         return ("NO REPL: the game's ue4ss folder has no LuaRepl folder. Use a UE4SS build with the external Lua REPL and "
                 "[Debug] ExternalLuaReplEnabled = 1, or install the VibeBridge mod (uvmod install-bridge), then start the game.")
@@ -49,26 +38,11 @@ def timeout_message(delivery: str, seconds: float, cet: bool = False) -> str:
 
 class Game(Session):
     def timeout_message(self, delivery: str, seconds: float) -> str:
-        if self.settings.is_cet:
-            return timeout_message(delivery, seconds, cet=True)
         return timeout_message(delivery, seconds)
-
-    def bridge_facts(self) -> list[str]:
-        """While CET lives here: its heartbeat facts (CET writes info lines to its logs only when a warning flushes
-        them, so the heartbeat says more). UE4SS's status needs none."""
-        if not self.settings.is_cet:
-            return []
-        info = self.transport.bridge_info() or {}
-        facts = [f"v{info['version']}" if info.get("version") else "", f"CET {info['cet']}" if info.get("cet") else "",
-                 f"{info['handlers']} CETBridge handlers" if info.get("handlers") else ""]
-        return [f for f in facts if f]
 
     def status_texts(self, st) -> dict:
         """The status lines that name UE4SS, its ini or its folder layout."""
         unknown = "game: unknown (no *-Shipping.exe beside the ue4ss folder; set UVMOD_PROCESS)"
-        if self.settings.is_cet:
-            return {"game_unknown": unknown,
-                    "repl_missing": "repl: no LuaRepl folder in mods/VibeBridge (uvmod install-bridge)"}
         hot = st.hot_reload_setting
         warn = "  <- unsafe once any mod hooks Blueprint functions (hang or crash on reload)" if hot.replace(" ", "").endswith("=1") else ""
         return {"game_unknown": unknown,
@@ -78,14 +52,11 @@ class Game(Session):
 
     def screenshot(self, out: str | None = None, mod: str | None = None, ui: bool = True) -> str:
         """Take an engine screenshot, with the game's UI unless `ui` is false, copy it here, scale it to 1280 px wide if
-        ffmpeg exists. Returns the path. With CET (no screenshot call of its own) the game's window is copied from the
-        screen instead, always with its UI, and only while the game is the window in front."""
-        if self.settings.is_cet:
-            return self.window_screenshot(out)
+        ffmpeg exists. Returns the path."""
         before = self.transport.newest_shot()
         result = self.exec(screenshot_lua(ui), mod)
         if not result.ok:
-            raise GameError(protocol.render_text(result.answer) if result.answer else timeout_message(result.delivery, self.settings.timeout))
+            raise GameError(protocol.render_text(result.answer) if result.answer else self.no_answer(result.delivery))
         now = None
         for _ in range(20):
             time.sleep(0.5)
@@ -102,8 +73,6 @@ class Game(Session):
 
     def console(self, command: str, mod: str | None = None) -> str:
         """Run an engine console command as the local player (open a map, ...). Shipping builds compile many out."""
-        if self.settings.is_cet:
-            raise GameError(UE_ONLY)
         if not command.strip():
             raise GameError("a console command is needed")
         lua = (f"local pc = FindFirstOf(\"PlayerController\") if not pc:IsValid() then error(\"no player controller\") end "
@@ -111,7 +80,7 @@ class Game(Session):
                f"return \"ok\"")
         result = self.exec(lua, mod)
         if not result.ok:
-            raise GameError(protocol.render_text(result.answer) if result.answer else timeout_message(result.delivery, self.settings.timeout))
+            raise GameError(protocol.render_text(result.answer) if result.answer else self.no_answer(result.delivery))
         return f"ran: {command}"
 
     def swap(self, local_dir: str) -> tuple[bool, str]:
@@ -131,8 +100,6 @@ class Game(Session):
         """`count` engine screenshots `every_ms` apart, scheduled inside the game (so the timing is the game's, not the
         transport's), copied here and tiled into one contact sheet. Returns its path (or a folder of PNGs without
         ffmpeg)."""
-        if self.settings.is_cet:
-            raise GameError("bursts need the engine's own screenshots (UE4SS); with CET take single shots")
         if not 2 <= count <= 16:
             raise GameError("a burst is 2 to 16 screenshots")
         before = set(self.transport.recent_shots(count + 4))
@@ -151,7 +118,7 @@ return "ok"
 """
         result = self.exec(lua, mod)
         if not result.ok:
-            raise GameError(protocol.render_text(result.answer) if result.answer else timeout_message(result.delivery, self.settings.timeout))
+            raise GameError(protocol.render_text(result.answer) if result.answer else self.no_answer(result.delivery))
         # The engine writes one screenshot at a time and drops requests meanwhile (RV There Yet?, 2560x1440: one
         # PNG per ~0.73 s), so stop waiting once nothing new arrived for a while after the last scheduled shot.
         t0 = time.monotonic()
@@ -197,8 +164,6 @@ return "ok"
         from .crash import parse_crash_context
         from .core.minidump import parse_minidump
 
-        if self.settings.is_cet:
-            return self._crash_report_cet(journal_count)
         now = time.time()
         out: list[str] = []
         st = self.status()
@@ -267,57 +232,6 @@ return "ok"
         shutil.rmtree(tmp, ignore_errors=True)
         return "\n".join(out)
 
-    def _crash_report_cet(self, journal_count: int) -> str:
-        """crash_report for Cyberpunk 2077: REDEngine's newest crash report (its stack trace, the head of report.txt and
-        the minidump's exception), the end of CET's scripting.log, and the last requests uvmod sent."""
-        from .core.minidump import parse_minidump
-
-        now = time.time()
-        out: list[str] = []
-        st = self.status()
-        out.append("game: " + ("running" if st.running else "not running" if st.running is False else "unknown")
-                   + (f" ({st.process}{', started ' + st.started if st.started else ''})" if st.running else ""))
-        folders = self.transport.crash_files().get("folders") or []
-        if folders:
-            f = folders[0]
-            path = f["path"].rstrip("/\\")
-            m = max(0, int((now - f["time"]) / 60))
-            when = f"{m} min ago" if m < 120 else time.strftime("%Y-%m-%d %H:%M", time.localtime(f["time"]))
-            if st.running:
-                out.append("(the game is running now: the crash report below is from an earlier session)")
-            out.append(f"\nnewest REDEngine crash report ({when}): {path}")
-            names = f.get("files") or []
-            for name, head in (("stacktrace.txt", 40), ("report.txt", 25)):
-                if name in names:
-                    try:
-                        lines = self.transport.read_text(f"{path}/{name}").splitlines()
-                        out.append(f"{name}:")
-                        out += ["  " + l for l in lines[:head] if l.strip()]
-                    except Exception as e:
-                        out.append(f"{name}: could not read it: {e}")
-            dmp = next((n for n in names if n.lower().endswith(".dmp")), None)
-            if dmp:
-                tmp = tempfile.mkdtemp(prefix="uvmod-crash-")
-                local = os.path.join(tmp, dmp)
-                try:
-                    self.transport.fetch(f"{path}/{dmp}", local)
-                    with open(local, "rb") as fh:
-                        out += parse_minidump(fh.read(), INTERESTING).describe()[:16]
-                except Exception as e:
-                    out.append(f"minidump: could not read {path}/{dmp}: {e}")
-                finally:
-                    shutil.rmtree(tmp, ignore_errors=True)
-        else:
-            out.append("\nno REDEngine crash report")
-        out.append(f"\n{self.transport.engine.log}, last lines:")
-        out += ["  " + l for l in self.log(25)]
-        entries = journal.tail(self.settings, journal_count)
-        out.append("\nlast requests uvmod sent (a request with no answer right before the crash is the first suspect):")
-        out += ["  " + l for l in journal.render(entries).splitlines()]
-        if entries and st.running is False and entries[-1].get("done") in (None, "timeout", "failed"):
-            out.append("  -> the last request got no answer and the game is gone: it most likely killed the game.")
-        return "\n".join(out)
-
     # --- the reflection index -------------------------------------------------------------------------------------
 
     def build_index(self, from_file: str | None = None, blueprints: bool = True, keep: bool = False) -> str:
@@ -325,9 +239,6 @@ return "ok"
         build from a .jmap file already here). Returns a report."""
         from . import index
 
-        if self.settings.is_cet:
-            raise GameError("the reflection index is built from UE4SS's dump; for CET's types see NativeDB "
-                            "(nativedb.red4ext.com) or DumpType(\"ClassName\") through `lua`")
         folder = index.folder()
         folder.mkdir(parents=True, exist_ok=True)
         lines = []
@@ -341,7 +252,7 @@ return "ok"
             finally:
                 self.settings.timeout = saved
             if result.answer is None:
-                raise GameError(timeout_message(result.delivery, 900.0))
+                raise GameError(self.no_answer(result.delivery, 900.0))
             if not result.ok:
                 err = str(result.answer.get("error", ""))
                 if "DumpJMAP" in err and "nil" in err:

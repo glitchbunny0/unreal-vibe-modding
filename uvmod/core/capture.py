@@ -1,4 +1,4 @@
-"""A screenshot of the game's window taken from the screen, for engines with no screenshot call of their own (CET)."""
+"""A screenshot of the game's window taken from the screen, for engines with no screenshot call of their own."""
 
 from __future__ import annotations
 

@@ -18,7 +18,7 @@ KEYS = {
     "MOD": "the Lua mod whose state runs code (default: the only one there is; see: {name} mods)",
     "LIMIT_MS": "time limit per request in ms, 1-5000 (default: the game's, 250)",
     "TIMEOUT": "seconds to wait for an answer (default 10)",
-    "PROCESS": "the game's process name (default: the *-Shipping.exe beside the ue4ss folder)",
+    "PROCESS": "the game's process name (default: {process_default})",
     "SHOTS": "screenshot folder (default: <LocalAppData>/<Project>/Saved/Screenshots/Windows)",
     "APPID": "the game's Steam app id, for `launch` (default: read from the Steam library the game is in)",
     "LAUNCH": "a command that starts the game, for `launch` instead of Steam (run on the game's machine)",
@@ -30,10 +30,12 @@ def keys_for(app: App) -> dict[str, str]:
     """The full settings of one app, <PREFIX>_KEY -> help, for the help output: the root key first, then the shared
     keys with the app's extra keys in their place (before JOURNAL), which is the order the help has always shown."""
     out = {f"{app.prefix}_{app.root_key}": app.root_help}
+    # The default process is the engine's when it is fixed; otherwise the game exe beside the ue4ss folder (UE4SS's case).
+    process_default = app.engine.process or "the *-Shipping.exe beside the ue4ss folder"
     for suffix, help_text in KEYS.items():
         if suffix == "JOURNAL":
             out.update({f"{app.prefix}_{s}": h for s, h in app.keys.items()})
-        out[f"{app.prefix}_{suffix}"] = help_text.format(prefix=app.prefix, name=app.name)
+        out[f"{app.prefix}_{suffix}"] = help_text.format(prefix=app.prefix, name=app.name, process_default=process_default)
     return out
 
 

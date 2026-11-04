@@ -1,9 +1,5 @@
-"""What differs between the mod loaders uvmod drives: where their files are, what the game's process is called.
-
-`ue4ss` is UE4SS in an Unreal Engine game (the root is the ue4ss folder). `cet` is Cyber Engine Tweaks in Cyberpunk 2077
-(the root is CET's folder, <game>/bin/x64/plugins/cyber_engine_tweaks); there VibeBridge is a CET mod, and since CET
-lets a mod write only inside its own folder, the LuaRepl folder lives in the mod.
-"""
+"""What differs between the mod loaders the core drives: where their files are, what the game's process is called.
+An app defines its own Engine; `ue4ss` here is the one uvmod uses (the root is the ue4ss folder)."""
 
 from __future__ import annotations
 
@@ -37,23 +33,3 @@ UE4SS = Engine(
     crash_dir="saved:Crashes",
     status_pattern=r"UE4SS - v|\[ExternalLuaRepl\] (?!Request )|\[VibeBridge\]|loaded WITHOUT logic|swapped logic|swap REFUSED",
 )
-
-CET = Engine(
-    name="cet",
-    label="Cyber Engine Tweaks",
-    repl="mods/VibeBridge/LuaRepl",
-    mods="mods",
-    log="scripting.log",
-    bridge_marker="mods/VibeBridge/init.lua",
-    reporter="REDEngineErrorReporter",
-    process="Cyberpunk2077",
-    exe=("..", "..", "Cyberpunk2077.exe"),  # the CET folder is <game>/bin/x64/plugins/cyber_engine_tweaks: two up is the game's exe
-    crash_dir="localappdata:REDEngine/ReportQueue",
-    status_pattern=r"\[VibeBridge\]|Mod .* (loaded|failed)|Ignoring mod|LuaVM: Reloaded|Tried to access invalid",
-)
-
-ENGINES = {e.name: e for e in (UE4SS, CET)}
-
-
-def get(name: str) -> Engine:
-    return ENGINES[name]

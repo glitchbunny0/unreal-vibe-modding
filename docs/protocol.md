@@ -67,7 +67,7 @@ mod. There is no network listener. Do not use it in online play.
 
 ## Cyber Engine Tweaks
 
-VibeBridge also exists as a CET mod for Cyberpunk 2077 (`uvmod/bridge/cet/VibeBridge`, `UVMOD_CET` on the client). It
+VibeBridge also exists as a CET mod for Cyberpunk 2077 (`cetmod/bridge/VibeBridge`, `CETMOD_CET` on the client). It
 speaks protocol 1 with the VibeBridge delivery above, with these differences:
 
 - CET lets a mod read and write only inside its own folder, so the folder is `<cet>/mods/VibeBridge/LuaRepl`.

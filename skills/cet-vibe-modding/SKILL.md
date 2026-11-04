@@ -1,21 +1,20 @@
 ---
 name: cet-vibe-modding
-description: Use when modding a running Cyberpunk 2077 through Cyber Engine Tweaks with uvmod (CLI or MCP tools). Probe, change and verify the game in small steps without freezing it.
+description: Use when modding a running Cyberpunk 2077 through Cyber Engine Tweaks with cetmod (CLI or MCP tools). Probe, change and verify the game in small steps without freezing it.
 ---
 
-# Vibe modding Cyberpunk 2077 with uvmod and Cyber Engine Tweaks
+# Vibe modding Cyberpunk 2077 with cetmod and Cyber Engine Tweaks
 
-The player runs the game with Cyber Engine Tweaks (CET) and the VibeBridge CET mod; you reach it through `uvmod`
-(with `UVMOD_CET` set) or the MCP server's tools. Code you send runs as Lua (LuaJIT) inside VibeBridge's environment,
+The player runs the game with Cyber Engine Tweaks (CET) and the VibeBridge CET mod; you reach it through `cetmod` or the MCP server's tools. Code you send runs as Lua (LuaJIT) inside VibeBridge's environment,
 in CET's `onUpdate`, with the full power of a CET mod. A crash ends the player's session, and a frozen game too.
 
 ## Start of a session
 
 1. `status`: is the game running, and does VibeBridge answer? It shows VibeBridge's and CET's versions.
-2. If nothing answers: the game is not running, VibeBridge is not installed (`uvmod install-bridge`), or CET has not
+2. If nothing answers: the game is not running, VibeBridge is not installed (`cetmod install-bridge`), or CET has not
    loaded it yet. CET loads mods at game start and when the player clicks "Reload all mods" in CET's overlay; ask
    the player to do that, it takes a second and keeps their session.
-3. `cet` `overview` tells you where things stand: district, eddies, time, tracked quest, vehicle. `Game.GetPlayer()`
+3. `query` `overview` tells you where things stand: district, eddies, time, tracked quest, vehicle. `Game.GetPlayer()`
    is `nil` in menus and on loading screens: check before using it.
 
 ## Rules that keep the game alive
@@ -25,7 +24,7 @@ in CET's `onUpdate`, with the full power of a CET mod. A crash ends the player's
 - **Hooks stay until CET reloads its mods.** `ObserveAfter`, `ObserveBefore` and `Override` cannot be removed by a
   mod. Register each one once (keep a flag in a global) and keep callbacks short: they run on every call. CETBridge's
   `observe_events` buffers calls for you and `unobserve_events` turns its callback into a no-op.
-- **Ask before changing the save.** Items, quest facts, levels and stats end up in the player's next save. The `cet`
+- **Ask before changing the save.** Items, quest facts, levels and stats end up in the player's next save. The `query`
   tool's list marks the handlers that change the game.
 - **64-bit numbers are LuaJIT cdata** (entity ids, some quantities): `tonumber()` them before arithmetic. `vb.json`
   and the value display handle them.
@@ -43,7 +42,7 @@ a quick probe.
 
 ## How to find out what the game does
 
-- **Ready-made handlers first.** `cet` covers the player, inventory, equipment, status effects, nearby entities,
+- **Ready-made handlers first.** `query` covers the player, inventory, equipment, status effects, nearby entities,
   what the player looks at (`get_scanner_info`), TweakDB (search by name, records with their fields), types
   (`dump_type` lists a class's functions with signatures), quest facts, and observing a game function's calls. The
   weather cannot be set on patch 2.5 (`set_weather` says so). When a probe you wrote would be worth having as a handler
@@ -59,7 +58,7 @@ a quick probe.
   the game is the window in front; otherwise it refuses, and you ask the player to switch back. When you run on the
   game PC, your own window is usually the one in front: ask the player to switch to the game, then take the shot.
 - **CLI from Windows PowerShell 5.1:** write strings inside the Lua with single quotes; it drops embedded double quotes
-  from arguments. Or use `uvmod run file.lua`, or the MCP tools.
+  from arguments. Or use `cetmod run file.lua`, or the MCP tools.
 - **The log lags.** CET writes `scripting.log` out when a warning flushes it, so recent info lines may be missing.
   Your prints come back in the answer anyway.
 
@@ -73,4 +72,4 @@ a quick probe.
 
 `lua` returns printed lines, then one `=> value` per returned value and `OK`, or `ERROR:` without a traceback. Game
 objects show as `object: ClassName`, CET's types (Vector4, CName, TweakDBID, ItemID) as their constructor text, tables
-as their entry count. Globals persist between requests; locals do not. `cet` returns the handler's result as JSON.
+as their entry count. Globals persist between requests; locals do not. `query` returns the handler's result as JSON.

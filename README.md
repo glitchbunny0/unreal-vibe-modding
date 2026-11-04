@@ -10,9 +10,9 @@ and say what feels wrong; the agent probes the game, writes the mod, and verifie
   as Claude Code, Codex or Hermes.
 - **VibeBridge**, a small Lua mod, so it also works with official UE4SS releases.
 - **[Agent skills](skills/)**, for what works when an agent mods a game. Contributions welcome.
-- **Cyberpunk 2077** too, through [Cyber Engine Tweaks](#cyberpunk-2077-cyber-engine-tweaks): the same CLI and MCP
-  server, with VibeBridge as a CET mod. The kit around it (source reviews, build scripts, crash probe, the game's
-  measured 2.5 API facts as an agent skill) is [cp2077-vibe-modding](https://github.com/glitchbunny0/cp2077-vibe-modding).
+- **Cyberpunk 2077** too, through [Cyber Engine Tweaks](#cyberpunk-2077-cyber-engine-tweaks): `cetmod`, a second CLI
+  and MCP server on the same core, with VibeBridge as a CET mod. The kit around it (source reviews, build scripts,
+  crash probe, the game's measured 2.5 API facts as an agent skill) is [cp2077-vibe-modding](https://github.com/glitchbunny0/cp2077-vibe-modding).
 
 Python 3.9+, standard library only. MIT licensed.
 
@@ -247,30 +247,30 @@ Tools: `lua`, `mods`, `status`, `log`, `screenshot`, `inspect`, `call`, `snapsho
 
 ## Cyberpunk 2077 (Cyber Engine Tweaks)
 
-`uvmod` also drives Cyberpunk 2077 through [Cyber Engine Tweaks](https://github.com/maximegmd/CyberEngineTweaks) (CET),
-the game's Lua mod loader. Install CET first (v1.38.0 or later for patch 2.5, from its GitHub releases or Nexus Mods),
-start the game once so CET sets itself up, then point `uvmod` at CET's folder instead of a ue4ss folder, in
-`~/.config/uvmod/config` (on Windows `%USERPROFILE%\.config\uvmod\config`) or as an environment variable:
+`cetmod` drives Cyberpunk 2077 through [Cyber Engine Tweaks](https://github.com/maximegmd/CyberEngineTweaks) (CET),
+the game's Lua mod loader, on the same core as `uvmod`. Install CET first (v1.38.0 or later for patch 2.5, from its
+GitHub releases or Nexus Mods), start the game once so CET sets itself up, then point `cetmod` at CET's folder, in
+`~/.config/cetmod/config` (on Windows `%USERPROFILE%\.config\cetmod\config`) or as an environment variable:
 
 ```ini
-UVMOD_CET=C:\Program Files (x86)\Steam\steamapps\common\Cyberpunk 2077\bin\x64\plugins\cyber_engine_tweaks
+CETMOD_CET=C:\Program Files (x86)\Steam\steamapps\common\Cyberpunk 2077\bin\x64\plugins\cyber_engine_tweaks
 ```
 
 ```sh
-uvmod install-bridge          # VibeBridge as a CET mod, in mods/VibeBridge; then reload CET's mods or start the game
-uvmod status                  # VibeBridge: running (v0.1.0, CET v1.38.1, 35 CETBridge handlers)
-uvmod lua 'Game.GetPlayer():GetWorldPosition()'
-uvmod cet overview            # {"district": "Rancho Coronado", "eddies": 340925, "quest": {...}, ...}
-uvmod cet                     # the game handlers: inventory, equipment, TweakDB, quest facts, teleport, ...
+cetmod install-bridge         # VibeBridge as a CET mod, in mods/VibeBridge; then reload CET's mods or start the game
+cetmod status                 # VibeBridge: running (v0.1.0, CET v1.38.1, 35 CETBridge handlers)
+cetmod lua 'Game.GetPlayer():GetWorldPosition()'
+cetmod query overview         # {"district": "Rancho Coronado", "eddies": 340925, "quest": {...}, ...}
+cetmod query                  # the game handlers: inventory, equipment, TweakDB, quest facts, teleport, ...
 ```
 
 - **VibeBridge for CET** speaks the same protocol from inside CET's mod sandbox. CET lets a mod touch only its own
   folder, so the `LuaRepl` folder is `mods/VibeBridge/LuaRepl`. Code runs in VibeBridge's environment (LuaJIT) with
   CET's API (`Game`, `TweakDB`, `Observe`, `Override`, `NewObject`, ...). `vb.json(value)` turns anything, game
   objects and 64-bit numbers included, into JSON.
-- **`uvmod cet HANDLER [ARGS]`** (MCP tool `cet`) calls one of 35 ready-made game handlers: the 34 of
+- **`cetmod query HANDLER [ARGS]`** (MCP tool `query`) calls one of 35 ready-made game handlers: the 34 of
   [cyber-engine-tweak-mcp](https://github.com/Y4rd13/cyber-engine-tweak-mcp)'s CETBridge, in the version
-  [WkMCP](https://github.com/Guikingone/WkMCP) fixed (MIT, see `uvmod/bridge/cet/VibeBridge/LICENSE.CETBridge`), kept
+  [WkMCP](https://github.com/Guikingone/WkMCP) fixed (MIT, see `cetmod/bridge/VibeBridge/LICENSE.CETBridge`), kept
   unmodified in `handlers.lua`, and `cetbridge_fixes.lua`, which replaces the twelve that fail or come back incomplete on
   patch 2.5 (inventory, nearby entities, teleport, TweakDB search and records, type dumps, names, health, zone) and adds
   `overview` (eddies, district, wanted level, time, tracked quest). The list marks which ones change the game.
@@ -278,11 +278,11 @@ uvmod cet                     # the game handlers: inventory, equipment, TweakDB
   not enforced): never send a loop without a bound. Screenshots copy the game's window from the screen, and only while
   the game is the window in front (otherwise the picture would show the player's other programs). `log` reads CET's
   `scripting.log`, which CET writes out only when a warning flushes it. The Unreal-only commands (reflection, input,
-  calls, watch, index, console) refuse to run.
+  calls, watch, index, console) do not exist here.
 
-- **From Windows PowerShell 5.1**, write strings inside the Lua with single quotes (`uvmod lua "return 'text'"`):
+- **From Windows PowerShell 5.1**, write strings inside the Lua with single quotes (`cetmod lua "return 'text'"`):
   PowerShell 5.1 drops double quotes inside an argument it hands to a program, so the Lua arrives broken. For longer
-  code, `uvmod run file.lua`. The MCP server has no such problem.
+  code, `cetmod run file.lua`. The MCP server has no such problem.
 
 Tested off-game under Lua 5.4 and LuaJIT (`tests/fake_cet.lua` stands in for CET's sandbox), and live on patch 2.5 with
 CET 1.38.1: on the game PC itself (Windows, Python 3.13; CLI, MCP and screenshot; a request's round trip took 30-50 ms, plus

@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from importlib import resources
 
 from .core.session import GameError
-from .game import Game, timeout_message
+from .game import Game
 
 NEED_HELPER = "uvmod: send the helper"
 
@@ -76,7 +76,7 @@ def call(game: Game, mod: str | None, helper: Helper, expr: str, limit_ms: int =
     if result.answer and result.answer.get("ok") and result.answer.get("values") == [f'"{NEED_HELPER}"']:
         result = game.exec(helper.payload + "\nreturn " + expr, mod, limit_ms)
     if result.answer is None:
-        raise GameError(timeout_message(result.delivery, game.settings.timeout))
+        raise GameError(game.no_answer(result.delivery))
     if not result.answer.get("ok"):
         raise LuaError(str(result.answer.get("error", "")).split("\nstack traceback:")[0].strip())
     lines: list[str] = []
