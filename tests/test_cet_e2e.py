@@ -1,5 +1,5 @@
-"""Cyberpunk 2077 support: settings, the CET VibeBridge mod (in tests/fake_cet.lua, a stand-in for CET's mod sandbox)
-answering the real client, CETBridge's handlers through `cet`, and the commands that refuse to run with CET.
+"""cetmod: Cyberpunk 2077 support, with the CET VibeBridge mod (in tests/fake_cet.lua, a stand-in for CET's mod
+sandbox) answering the real client, CETBridge's handlers through `query`, and the settings and CLI texts.
 
 The bridge runs under Lua 5.4 always, and under LuaJIT (CET's Lua) too when lupa is installed."""
 
@@ -20,12 +20,13 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
-from uvmod import cet, cli  # noqa: E402
-from uvmod.core import engine  # noqa: E402
-from uvmod.config import ConfigError, Settings  # noqa: E402
+import cetmod  # noqa: E402
+from cetmod import cli, handlers as cet  # noqa: E402
+from cetmod.config import Settings  # noqa: E402
+from uvmod.core.config import ConfigError  # noqa: E402
+from cetmod.game import Game  # noqa: E402
+from cetmod.mcp import Server  # noqa: E402
 from uvmod.core.session import GameError  # noqa: E402
-from uvmod.game import Game  # noqa: E402
-from uvmod.mcp import Server, tools_for  # noqa: E402
 
 LUA54 = os.environ.get("LUA") or shutil.which("lua5.4") or shutil.which("lua")
 RUNTIMES = {}
@@ -34,7 +35,7 @@ if LUA54:
 if importlib.util.find_spec("lupa"):
     RUNTIMES["luajit"] = [sys.executable, str(ROOT / "tests" / "luajit_run.py")]
 
-ENV_KEYS = ("UVMOD_CET", "UVMOD_UE4SS", "UVMOD_TRANSPORT", "UVMOD_TIMEOUT", "UVMOD_CONFIG", "UVMOD_JOURNAL", "UVMOD_MOD")
+ENV_KEYS = ("CETMOD_CET", "CETMOD_TRANSPORT", "CETMOD_TIMEOUT", "CETMOD_CONFIG", "CETMOD_JOURNAL", "CETMOD_MOD")
 
 
 class CetDir:
@@ -48,8 +49,8 @@ class CetDir:
         (x64 / "Cyberpunk2077.exe").write_bytes(b"")
         (self.cet / "scripting.log").write_bytes(b"[x] [info] Mod Other loaded! ('x')\n")
         self.journal = str(Path(self.tmp.name) / "journal.jsonl")
-        self.env = {"UVMOD_CET": str(self.cet), "UVMOD_TRANSPORT": "local", "UVMOD_TIMEOUT": "5",
-                    "UVMOD_CONFIG": "/nonexistent", "UVMOD_JOURNAL": self.journal}
+        self.env = {"CETMOD_CET": str(self.cet), "CETMOD_TRANSPORT": "local", "CETMOD_TIMEOUT": "5",
+                    "CETMOD_CONFIG": "/nonexistent", "CETMOD_JOURNAL": self.journal}
 
     def settings(self, **kw) -> Settings:
         return Settings.load(dict(self.env, **kw))
@@ -97,19 +98,18 @@ class SettingsAndCatalog(unittest.TestCase):
         d = CetDir()
         try:
             s = d.settings()
-            self.assertTrue(s.is_cet)
+            self.assertIs(s.app, cetmod.APP)
+            self.assertIs(s.engine, cetmod.CET)
             self.assertEqual(s.root, str(d.cet))
             with self.assertRaises(ConfigError):
-                Settings.load(dict(d.env, UVMOD_UE4SS="/somewhere"))
-            with self.assertRaises(ConfigError):
-                Settings.load({"UVMOD_CONFIG": "/nonexistent"})
+                Settings.load({"CETMOD_CONFIG": "/nonexistent"})
         finally:
             d.close()
 
     def test_engine_paths(self):
-        self.assertEqual(engine.CET.repl, "mods/VibeBridge/LuaRepl")
-        self.assertEqual(engine.UE4SS.repl, "LuaRepl")
-        self.assertEqual(engine.CET.process, "Cyberpunk2077")
+        self.assertEqual(cetmod.CET.repl, "mods/VibeBridge/LuaRepl")
+        self.assertEqual(cetmod.CET.process, "Cyberpunk2077")
+        self.assertEqual(cetmod.CET.exe, ("..", "..", "Cyberpunk2077.exe"))
 
     def test_catalog_matches_the_lua_handlers(self):
         self.assertEqual(sorted(cet.HANDLERS), cet.lua_handlers())
@@ -123,10 +123,10 @@ class SettingsAndCatalog(unittest.TestCase):
             cet.parse_args("nonsense")
 
     def test_mcp_tools(self):
-        names = [t["name"] for t in tools_for("cet")]
-        self.assertEqual(names, ["lua", "mods", "status", "log", "screenshot", "push", "game", "cet"])
-        self.assertIn("watch", [t["name"] for t in tools_for("ue4ss")])
-        game = next(t for t in tools_for("cet") if t["name"] == "game")
+        server = Server()
+        names = [t["name"] for t in server.tools()]
+        self.assertEqual(names, ["lua", "mods", "status", "log", "screenshot", "push", "game", "query"])
+        game = next(t for t in server.tools() if t["name"] == "game")
         self.assertNotIn("console", game["inputSchema"]["properties"]["action"]["enum"])
 
     def test_capture_copies_only_the_game(self):
@@ -137,7 +137,7 @@ class SettingsAndCatalog(unittest.TestCase):
         self.assertLess(script.index("GetForegroundWindow()"), script.index("CopyFromScreen"))
         self.assertIn("Get-Process -Name 'Cyber''punk'", script)
 
-    def test_ue_only_commands_refuse(self):
+    def test_unreal_commands_do_not_exist_here(self):
         d = CetDir()
         saved = {k: os.environ.get(k) for k in ENV_KEYS}
         os.environ.update(d.env)
@@ -145,7 +145,7 @@ class SettingsAndCatalog(unittest.TestCase):
             for argv in (["world"], ["watch", "/Script/X:Y"], ["index"], ["input", "list"], ["console", "x"]):
                 code, out, err = run_cli(argv)
                 self.assertEqual(code, cli.EXIT_USAGE, argv)
-                self.assertIn("needs UE4SS", err)
+                self.assertIn("see: cetmod help", err)
             game = Game(d.settings())
             with self.assertRaises(GameError):
                 game.burst(3)
@@ -247,10 +247,10 @@ class CetBridgeHarness:
         # cetbridge_fixes: absolute health beside the percentage, not the percentage as "health"
         self.assertEqual((answer["result"]["health"], answer["result"]["healthPercent"]), (432, 89))
         self.assertIn("unknown handler", self.game.query("nope")["error"])
-        code, out, _ = run_cli(["cet", "player_info"])
+        code, out, _ = run_cli(["query", "player_info"])
         self.assertEqual(code, 0)
         self.assertEqual(json.loads(out)["streetCred"], 50)
-        code, out, _ = run_cli(["cet"])
+        code, out, _ = run_cli(["query"])
         self.assertIn("teleport(x, y, z)", out)
 
     def test_fixed_handlers(self):
@@ -306,9 +306,9 @@ class CetBridgeHarness:
         self.assertIn("[VibeBridge] v0.1.0 ready", out)
         server = Server()
         listed = server.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
-        self.assertIn("cet", [t["name"] for t in listed["result"]["tools"]])
+        self.assertIn("query", [t["name"] for t in listed["result"]["tools"]])
         reply = server.handle({"jsonrpc": "2.0", "id": 2, "method": "tools/call",
-                               "params": {"name": "cet", "arguments": {"handler": "player_info"}}})
+                               "params": {"name": "query", "arguments": {"handler": "player_info"}}})
         self.assertFalse(reply["result"]["isError"], reply)
         self.assertEqual(json.loads(reply["result"]["content"][0]["text"])["level"], 57)
         reply = server.handle({"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "watch", "arguments": {}}})

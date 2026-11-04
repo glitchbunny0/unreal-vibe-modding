@@ -103,13 +103,15 @@ class Transport:
         """Copy the game's window from the screen into the PNG `dest`, as the player sees it, for engines with no
         screenshot call of their own (Cyber Engine Tweaks). Refuses (TransportError) while another window is in front:
         the screen would show the player's other programs. Returns a status line. Windows only: the ssh transport, or
-        uvmod on the game's PC."""
-        raise TransportError("window screenshots need Windows: the ssh transport, or uvmod running on the game's Windows PC")
+        the app running on the game's PC."""
+        raise TransportError(f"window screenshots need Windows: the ssh transport, or {self.settings.app.name} "
+                             "running on the game's Windows PC")
 
     def press_keys(self, codes: list[int], hold_ms: int) -> str:
         """Press virtual keys in the game's window (brought to the front first). Returns the foreground window class
         while pressing ("UnrealWindow" for an Unreal game)."""
-        raise TransportError("OS key presses need Windows: the ssh transport, or uvmod running on the game's Windows PC")
+        raise TransportError(f"OS key presses need Windows: the ssh transport, or {self.settings.app.name} "
+                             "running on the game's Windows PC")
 
     def powershell(self, script: str) -> str:
         raise TransportError("this needs the ssh transport (a Windows box reached over SSH)")

@@ -10,18 +10,19 @@ from pathlib import Path
 
 from .app import App
 
-# Settings every app has, by suffix; an app adds its root key first and its extra keys (App.keys) before JOURNAL.
+# Settings every app has, by suffix, their help with {prefix}/{name} where the app's names go in (filled by
+# keys_for); an app adds its root key first and its extra keys (App.keys) before JOURNAL.
 KEYS = {
-    "TRANSPORT": "local | ssh (default: ssh when UVMOD_HOST is set, else local)",
+    "TRANSPORT": "local | ssh (default: ssh when {prefix}_HOST is set, else local)",
     "HOST": "ssh target for the ssh transport, e.g. player@192.168.1.20",
-    "MOD": "the Lua mod whose state runs code (default: the only one there is; see: uvmod mods)",
+    "MOD": "the Lua mod whose state runs code (default: the only one there is; see: {name} mods)",
     "LIMIT_MS": "time limit per request in ms, 1-5000 (default: the game's, 250)",
     "TIMEOUT": "seconds to wait for an answer (default 10)",
     "PROCESS": "the game's process name (default: the *-Shipping.exe beside the ue4ss folder)",
     "SHOTS": "screenshot folder (default: <LocalAppData>/<Project>/Saved/Screenshots/Windows)",
     "APPID": "the game's Steam app id, for `launch` (default: read from the Steam library the game is in)",
     "LAUNCH": "a command that starts the game, for `launch` instead of Steam (run on the game's machine)",
-    "JOURNAL": "where uvmod records the requests it sends, for `crash` (default: ~/.local/state/uvmod/journal.jsonl; off: none)",
+    "JOURNAL": "where {name} records the requests it sends, for `crash` (default: ~/.local/state/{name}/journal.jsonl; off: none)",
 }
 
 
@@ -32,7 +33,7 @@ def keys_for(app: App) -> dict[str, str]:
     for suffix, help_text in KEYS.items():
         if suffix == "JOURNAL":
             out.update({f"{app.prefix}_{s}": h for s, h in app.keys.items()})
-        out[f"{app.prefix}_{suffix}"] = help_text
+        out[f"{app.prefix}_{suffix}"] = help_text.format(prefix=app.prefix, name=app.name)
     return out
 
 
