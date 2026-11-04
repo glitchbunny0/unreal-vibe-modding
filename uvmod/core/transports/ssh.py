@@ -43,7 +43,7 @@ class SshTransport(Transport):
     def __init__(self, settings):
         super().__init__(settings)
         if not settings.host:
-            raise TransportError("UVMOD_HOST is not set (ssh transport)")
+            raise TransportError(f"{settings.app.prefix}_HOST is not set (ssh transport)")
         self.ssh = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", settings.host]
         self.retries = 0  # sessions started again because they never read their input
         self.u = psq(settings.root)
@@ -238,9 +238,10 @@ $r | ConvertTo-Json -Compress
         return base64.b64encode(buf.getvalue()).decode("ascii")
 
     def _push_script(self, local_dir: str) -> str:
+        tar = f"{self.settings.app.name}-push.tar"
         return f"""
 New-Item -ItemType Directory -Force $mods | Out-Null
-$tar = Join-Path $env:TEMP 'uvmod-push.tar'
+$tar = Join-Path $env:TEMP {psq(tar)}
 [IO.File]::WriteAllBytes($tar, [Convert]::FromBase64String('{self._tar(local_dir)}'))
 tar -xf $tar -C $mods
 Remove-Item $tar
@@ -291,17 +292,18 @@ if ($f) {{ $f.FullName.Replace('\\','/') + '|' + $f.LastWriteTime.Ticks }}
         from ..keys import script as key_script
 
         body = key_script("__PROC__", codes, hold_ms, "__OUT__")
+        name = self.settings.app.name
         script = f"""
-$out = Join-Path $env:TEMP 'uvmod-key.out'
-$ps1 = Join-Path $env:TEMP 'uvmod-key.ps1'
+$out = Join-Path $env:TEMP {psq(name + '-key.out')}
+$ps1 = Join-Path $env:TEMP {psq(name + '-key.ps1')}
 Remove-Item $out -ErrorAction SilentlyContinue
 $body = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('{base64.b64encode(body.encode("utf-8")).decode()}'))
 $body = $body.Replace('__PROC__', $proc).Replace('__OUT__', $out)
 Set-Content -Path $ps1 -Value $body -Encoding UTF8
 $a = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument ('-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "' + $ps1 + '"')
 $p = New-ScheduledTaskPrincipal -UserId "$env:COMPUTERNAME\\$env:USERNAME" -LogonType Interactive
-Register-ScheduledTask -TaskName 'uvmod-key' -Action $a -Principal $p -Force | Out-Null
-Start-ScheduledTask -TaskName 'uvmod-key'
+Register-ScheduledTask -TaskName {psq(name + '-key')} -Action $a -Principal $p -Force | Out-Null
+Start-ScheduledTask -TaskName {psq(name + '-key')}
 $sw = [Diagnostics.Stopwatch]::StartNew()
 while (-not (Test-Path $out) -and $sw.Elapsed.TotalSeconds -lt 20) {{ Start-Sleep -Milliseconds 100 }}
 if (Test-Path $out) {{ Get-Content $out }} else {{ 'ERROR: the key presser did not finish (is a user logged in?)' }}
@@ -329,9 +331,10 @@ Get-ChildItem -File -Filter *.png $d -ErrorAction SilentlyContinue | Sort-Object
         from ..capture import script as capture_script
 
         body = capture_script("__PROC__", "__PNG__", "__TXT__")
+        name = self.settings.app.name
         script = f"""
-$png = Join-Path $env:TEMP 'uvmod-shot.png'; $txt = Join-Path $env:TEMP 'uvmod-shot.txt'
-$ps1 = Join-Path $env:TEMP 'uvmod-shot.ps1'
+$png = Join-Path $env:TEMP {psq(name + '-shot.png')}; $txt = Join-Path $env:TEMP {psq(name + '-shot.txt')}
+$ps1 = Join-Path $env:TEMP {psq(name + '-shot.ps1')}
 Remove-Item $png, $txt -ErrorAction SilentlyContinue
 $body = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('{base64.b64encode(body.encode("utf-8")).decode()}'))
 $body = $body.Replace('__PROC__', $proc.Replace("'", "''")).Replace('__PNG__', $png.Replace("'", "''")).Replace('__TXT__', $txt.Replace("'", "''"))
@@ -339,8 +342,8 @@ Set-Content -Path $ps1 -Value $body -Encoding UTF8
 try {{
   $a = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument ('-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "' + $ps1 + '"')
   $p = New-ScheduledTaskPrincipal -UserId "$env:COMPUTERNAME\\$env:USERNAME" -LogonType Interactive
-  Register-ScheduledTask -TaskName 'uvmod-shot' -Action $a -Principal $p -Force -ErrorAction Stop | Out-Null
-  Start-ScheduledTask -TaskName 'uvmod-shot' -ErrorAction Stop
+  Register-ScheduledTask -TaskName {psq(name + '-shot')} -Action $a -Principal $p -Force -ErrorAction Stop | Out-Null
+  Start-ScheduledTask -TaskName {psq(name + '-shot')} -ErrorAction Stop
 }} catch {{ 'ERROR: ' + $_.Exception.Message; exit 0 }}
 $sw = [Diagnostics.Stopwatch]::StartNew()
 while (-not (Test-Path $txt) -and $sw.Elapsed.TotalSeconds -lt 30) {{ Start-Sleep -Milliseconds 100 }}
@@ -361,6 +364,8 @@ $png.Replace('\\', '/')
         # A program started over SSH runs in the SSH session, where a game has no desktop. A scheduled task with an
         # interactive principal starts it in the logged-in user's session instead.
         rel_exe = "\\".join(self.engine.exe)  # the game's exe, relative to the root (empty: Steam starts it)
+        p = self.settings.app.prefix
+        task = self.settings.app.name + "-launch"
         script = f"""
 $launch = {psq(self.settings.launch)}
 $appid = {psq(self.settings.appid)}
@@ -369,7 +374,7 @@ if ($launch) {{ $exe = 'cmd.exe'; $arg = '/c ' + $launch }}
 elseif ($rel -and -not $appid) {{
   # start the game's own exe (GOG runs it as is; a Steam copy hands itself over to Steam)
   $exe = [IO.Path]::GetFullPath((Join-Path $u $rel))
-  if (-not (Test-Path $exe)) {{ 'ERROR: no game exe at ' + $exe + ' (set UVMOD_LAUNCH)'; exit 0 }}
+  if (-not (Test-Path $exe)) {{ 'ERROR: no game exe at ' + $exe + ' (set {p}_LAUNCH)'; exit 0 }}
   $arg = $null
 }}
 else {{
@@ -382,7 +387,7 @@ else {{
       if ($t -match ('"installdir"\\s+"' + [regex]::Escape($dir) + '"') -and $t -match '"appid"\\s+"(\\d+)"') {{ $appid = $Matches[1]; break }}
     }}
   }}
-  if (-not $appid) {{ 'ERROR: no Steam app id: set UVMOD_APPID (or UVMOD_LAUNCH)'; exit 0 }}
+  if (-not $appid) {{ 'ERROR: no Steam app id: set {p}_APPID (or {p}_LAUNCH)'; exit 0 }}
   $steam = (Get-ItemProperty 'HKCU:\\Software\\Valve\\Steam' -ErrorAction SilentlyContinue).SteamExe
   if (-not $steam) {{ $steam = 'C:\\Program Files (x86)\\Steam\\steam.exe' }}
   $exe = $steam; $arg = '-applaunch ' + $appid
@@ -391,8 +396,8 @@ try {{
   if ($arg) {{ $a = New-ScheduledTaskAction -Execute $exe -Argument $arg }}
   else {{ $a = New-ScheduledTaskAction -Execute $exe -WorkingDirectory (Split-Path $exe) }}
   $p = New-ScheduledTaskPrincipal -UserId "$env:COMPUTERNAME\\$env:USERNAME" -LogonType Interactive
-  Register-ScheduledTask -TaskName 'uvmod-launch' -Action $a -Principal $p -Force -ErrorAction Stop | Out-Null
-  Start-ScheduledTask -TaskName 'uvmod-launch' -ErrorAction Stop
+  Register-ScheduledTask -TaskName {psq(task)} -Action $a -Principal $p -Force -ErrorAction Stop | Out-Null
+  Start-ScheduledTask -TaskName {psq(task)} -ErrorAction Stop
   "started $exe $arg (in the logged-in session)"
 }} catch {{ 'ERROR: ' + $_.Exception.Message }}
 """
@@ -403,7 +408,7 @@ try {{
 
     def stop(self) -> str:
         script = f"""
-if (-not $proc) {{ 'ERROR: unknown game process (set UVMOD_PROCESS)'; exit 0 }}
+if (-not $proc) {{ 'ERROR: unknown game process (set {self.settings.app.prefix}_PROCESS)'; exit 0 }}
 # After a crash, the engine's crash reporter keeps running (Unreal's: and while it does Steam will not start the game
 # again).
 $reporter = @(Get-Process -Name {psq(self.engine.reporter)} -ErrorAction SilentlyContinue)
@@ -423,13 +428,22 @@ if (Get-Game) {{ "$proc is still running" }} else {{ "stopped $proc$closed" }}
     # --- crashes --------------------------------------------------------------------------------------------------
 
     def crash_files(self) -> dict:
-        scheme, _, sub = self.engine.crash_dir.partition(":")
-        if scheme == "localappdata":
-            crashes = f"$c = Join-Path $env:LOCALAPPDATA {psq(sub.replace('/', chr(92)))}"
+        if not self.engine.crash_dir:  # this engine keeps no crash folders of its own
+            script = """
+function T($i) { [DateTimeOffset]::new($i.LastWriteTimeUtc).ToUnixTimeSeconds() }
+$r = [ordered]@{ folders = @(); dumps = @() }
+$r.dumps = @(Get-ChildItem -File -Filter 'crash_*.dmp' $u -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 3 |
+  ForEach-Object { [ordered]@{ path = $_.FullName.Replace('\\','/'); time = (T $_) } })
+$r | ConvertTo-Json -Compress -Depth 5
+"""
         else:
-            crashes = (f"if ($proc) {{ $c = Join-Path $env:LOCALAPPDATA (($proc -replace '-(Win64|WinGDK)-Shipping$', '') "
-                       f"+ '\\Saved\\{sub}') }}")
-        script = f"""
+            scheme, _, sub = self.engine.crash_dir.partition(":")
+            if scheme == "localappdata":
+                crashes = f"$c = Join-Path $env:LOCALAPPDATA {psq(sub.replace('/', chr(92)))}"
+            else:
+                crashes = (f"if ($proc) {{ $c = Join-Path $env:LOCALAPPDATA (($proc -replace '-(Win64|WinGDK)-Shipping$', '') "
+                           f"+ '\\Saved\\{sub}') }}")
+            script = f"""
 function T($i) {{ [DateTimeOffset]::new($i.LastWriteTimeUtc).ToUnixTimeSeconds() }}
 $r = [ordered]@{{ folders = @(); dumps = @() }}
 $c = $null
@@ -487,7 +501,7 @@ $d = if ({psq(folder)}) {{ Join-Path $u {psq(folder)} }} else {{ $u }}
         """A big file (a reflection dump): gzip it on the box with Windows' own tar, copy that, unpack it here."""
         script = f"""
 $src = {psq(path)}
-$tgz = Join-Path $env:TEMP 'uvmod-fetch.tgz'
+$tgz = Join-Path $env:TEMP {psq(self.settings.app.name + '-fetch.tgz')}
 Remove-Item $tgz -ErrorAction SilentlyContinue
 tar -czf $tgz -C (Split-Path $src) (Split-Path $src -Leaf) 2>&1 | Out-Null
 if (Test-Path $tgz) {{ $tgz.Replace('\\','/') }} else {{ 'ERROR: tar could not pack ' + $src }}

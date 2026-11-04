@@ -77,7 +77,8 @@ class Transport:
         raise NotImplementedError
 
     def launch(self) -> str:
-        """Start the game (UVMOD_LAUNCH, else Steam with UVMOD_APPID or the app id found in the Steam library)."""
+        """Start the game (the app's LAUNCH command, else Steam with its APPID setting or the app id found in the
+        Steam library)."""
         raise NotImplementedError
 
     def stop(self) -> str:

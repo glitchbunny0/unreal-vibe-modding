@@ -266,7 +266,7 @@ class LocalTransport(Transport):
     # --- starting and stopping the game ---------------------------------------------------------------------------
 
     def appid(self) -> str:
-        """UVMOD_APPID, else the Steam library's appmanifest whose installdir holds this game."""
+        """The app's APPID setting, else the Steam library's appmanifest whose installdir holds this game."""
         if self.settings.appid:
             return self.settings.appid
         parts = self.root.as_posix().split("/steamapps/common/")
@@ -285,6 +285,7 @@ class LocalTransport(Transport):
         return ""
 
     def launch(self) -> str:
+        p = self.settings.app.prefix
         if self.settings.launch:
             subprocess.Popen(self.settings.launch, shell=True, start_new_session=os.name != "nt",
                              stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -292,20 +293,20 @@ class LocalTransport(Transport):
         if self.engine.exe and os.name == "nt":
             exe = self.root.joinpath(*self.engine.exe).resolve()
             if not exe.is_file():
-                raise TransportError(f"no game exe at {exe}; set UVMOD_LAUNCH to a command that starts the game")
+                raise TransportError(f"no game exe at {exe}; set {p}_LAUNCH to a command that starts the game")
             subprocess.Popen([str(exe)], cwd=str(exe.parent), stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                              stderr=subprocess.DEVNULL)
             return f"started {exe}"
         appid = self.appid()
         if not appid:
-            raise TransportError("no Steam app id: set UVMOD_APPID (or UVMOD_LAUNCH to a command that starts the game)")
+            raise TransportError(f"no Steam app id: set {p}_APPID (or {p}_LAUNCH to a command that starts the game)")
         url = f"steam://rungameid/{appid}"
         if os.name == "nt":
             os.startfile(url)  # type: ignore[attr-defined]  # Windows only
         else:
             opener = shutil.which("steam") or shutil.which("xdg-open")
             if not opener:
-                raise TransportError("neither steam nor xdg-open is on PATH; set UVMOD_LAUNCH")
+                raise TransportError(f"neither steam nor xdg-open is on PATH; set {p}_LAUNCH")
             subprocess.Popen([opener, url], start_new_session=True, stdin=subprocess.DEVNULL,
                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         return f"asked Steam to start app {appid}"
@@ -313,7 +314,7 @@ class LocalTransport(Transport):
     def stop(self) -> str:
         process = self._process()
         if not process:
-            raise TransportError("unknown game process (set UVMOD_PROCESS)")
+            raise TransportError(f"unknown game process (set {self.settings.app.prefix}_PROCESS)")
         # After a crash, the engine's crash reporter keeps running (Unreal's: and while it does Steam will not start the
         # game again).
         reporter = self.engine.reporter
@@ -345,6 +346,8 @@ class LocalTransport(Transport):
 
     def crash_files(self) -> dict:
         out: dict = {"folders": [], "dumps": []}
+        if not self.engine.crash_dir:  # this engine keeps no crash folders of its own
+            return out
         scheme, _, sub = self.engine.crash_dir.partition(":")
         crashes = self._localappdata_dir(sub) if scheme == "localappdata" else self._saved_dir(sub)
         if crashes and crashes.is_dir():
@@ -394,7 +397,7 @@ class LocalTransport(Transport):
 
         import tempfile as _tempfile
 
-        out = Path(_tempfile.gettempdir()) / "uvmod-key.out"
+        out = Path(_tempfile.gettempdir()) / f"{self.settings.app.name}-key.out"
         out.unlink(missing_ok=True)
         subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command",
                         script(self._process(), codes, hold_ms, str(out))], capture_output=True, timeout=60)
@@ -416,7 +419,7 @@ class LocalTransport(Transport):
         import tempfile as _tempfile
 
         tmp = Path(_tempfile.gettempdir())
-        png, txt = tmp / "uvmod-shot.png", tmp / "uvmod-shot.txt"
+        png, txt = tmp / f"{self.settings.app.name}-shot.png", tmp / f"{self.settings.app.name}-shot.txt"
         txt.unlink(missing_ok=True)
         subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command",
                         capture.script(self._process(), str(png), str(txt))], capture_output=True, timeout=60)
