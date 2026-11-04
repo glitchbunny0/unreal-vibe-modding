@@ -67,7 +67,7 @@ def read_ini_line(ini: Path, key: str) -> str:
 class LocalTransport(Transport):
     def __init__(self, settings):
         super().__init__(settings)
-        self.root = Path(settings.ue4ss)
+        self.root = Path(settings.root)
         if not self.root.is_dir():
             what = "UVMOD_CET" if settings.is_cet else "UVMOD_UE4SS"
             raise TransportError(f"{what} is not a folder on this machine: {self.root} (local transport)")

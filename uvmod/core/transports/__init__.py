@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Iterator
 
-from .. import engine
 from ..config import Settings
 
 
@@ -35,7 +34,7 @@ class Status:
 class Transport:
     def __init__(self, settings: Settings):
         self.settings = settings
-        self.engine = engine.get(settings.engine)
+        self.engine = settings.engine  # the Engine the app's settings name
 
     def exchange(self, request_id: str, native: bytes, slot: bytes, timeout: float) -> Exchange:
         raise NotImplementedError

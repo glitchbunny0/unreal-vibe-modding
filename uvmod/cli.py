@@ -10,8 +10,9 @@ import time
 from importlib import resources
 
 from . import __version__
+from .config import CET_APP, UE4SS_APP, ConfigError, Settings
 from .core import journal, protocol
-from .core.config import KEYS, ConfigError, Settings
+from .core.config import keys_for
 from .game import UE_ONLY, Game, GameError, timeout_message
 from .census import Census
 from .inputs import Input, parse_value, press_key
@@ -20,6 +21,14 @@ from .core.transports import TransportError
 from .watch import LuaError, Watcher, render_events, render_wait, render_watches
 
 EXIT_OK, EXIT_LUA_ERROR, EXIT_USAGE, EXIT_NO_ANSWER, EXIT_NOT_MET = 0, 1, 2, 3, 4
+
+
+def _settings_help() -> list[tuple[str, str]]:
+    """(KEY, help) pairs for the help text: UE4SS's root first, then CET's (as the list has always read), then the
+    shared keys with the app's extra ones in their place (see keys_for)."""
+    items = list(keys_for(UE4SS_APP).items())
+    items.insert(1, next(iter(keys_for(CET_APP).items())))  # keys_for puts the app's root key first
+    return items
 
 HELP = f"""uvmod {__version__} — vibe modding for Unreal Engine games: run Lua live in a running game through UE4SS.
 
@@ -122,7 +131,7 @@ Cyberpunk 2077 (Cyber Engine Tweaks: set UVMOD_CET instead of UVMOD_UE4SS)
   Exit codes: 0 OK, 1 the Lua raised an error, 2 usage or settings, 3 nothing answered, 4 wait timed out.
 
 Settings come from the environment or from the config file (KEY=value lines; the environment wins):
-""" + "\n".join(f"  {k:<16} {v}" for k, v in KEYS.items()) + """
+""" + "\n".join(f"  {k:<16} {v}" for k, v in _settings_help()) + """
   UVMOD_CONFIG     another config file path
 
 Two things can answer inside the game; uvmod finds out which:
@@ -264,7 +273,7 @@ def open_index():
 
     try:
         settings = Settings.load()
-        pinned, ue4ss = settings.index, settings.ue4ss
+        pinned, ue4ss = settings.index, settings.root
     except ConfigError:
         pinned, ue4ss = os.environ.get("UVMOD_INDEX", ""), ""
     path = find(pinned, ue4ss)
@@ -580,7 +589,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.cmd == "notes":
             from . import notes
 
-            print(notes.add(game.settings.ue4ss, " ".join(args.text)) if args.action == "add" else notes.read(game.settings.ue4ss))
+            print(notes.add(game.settings.root, " ".join(args.text)) if args.action == "add" else notes.read(game.settings.root))
             return EXIT_OK
         if args.cmd == "launch":
             print(game.launch())

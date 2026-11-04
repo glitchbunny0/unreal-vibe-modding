@@ -21,7 +21,7 @@ def path(settings: Settings) -> Path | None:
     if settings.journal:
         return Path(settings.journal).expanduser()
     base = os.environ.get("XDG_STATE_HOME") or os.path.join(os.path.expanduser("~"), ".local", "state")
-    return Path(base) / "uvmod" / "journal.jsonl"
+    return Path(base) / settings.app.name / "journal.jsonl"
 
 
 def short_code(code: str) -> str:

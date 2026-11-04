@@ -11,7 +11,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import uvmod.core.transports.ssh as ssh  # noqa: E402
-from uvmod.core.config import Settings  # noqa: E402
+from uvmod.config import Settings  # noqa: E402
 from uvmod.core.transports import TransportError  # noqa: E402
 
 # Behaves like the bootstrap: reads one base64 line, says GO, "runs" the script by printing it back.

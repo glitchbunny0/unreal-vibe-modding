@@ -20,7 +20,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from fake_game import FakeGame  # noqa: E402
 from uvmod import cli  # noqa: E402
 from uvmod.core import protocol  # noqa: E402
-from uvmod.core.config import ConfigError, Settings  # noqa: E402
+from uvmod.config import ConfigError, Settings  # noqa: E402
 from uvmod.game import Game, GameError  # noqa: E402
 
 TRICKY = 'return "quote \\" backslash \\\\ tab\t newline\n unicode \u00e9\u2603 \U0001f600 nul-ish \x01"'
@@ -93,7 +93,7 @@ class SettingsTests(unittest.TestCase):
                     del os.environ[k]
                 os.environ["UVMOD_CONFIG"] = str(conf)
                 s = Settings.load()
-                self.assertEqual((s.ue4ss, s.transport, s.host, s.timeout), ("C:\\Games\\X\\ue4ss", "ssh", "player@box", 7.0))
+                self.assertEqual((s.root, s.transport, s.host, s.timeout), ("C:\\Games\\X\\ue4ss", "ssh", "player@box", 7.0))
                 os.environ["UVMOD_TRANSPORT"] = "local"
                 self.assertEqual(Settings.load().transport, "local")
                 os.environ["UVMOD_TRANSPORT"] = "ftp"

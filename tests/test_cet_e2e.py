@@ -22,7 +22,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 from uvmod import cet, cli  # noqa: E402
 from uvmod.core import engine  # noqa: E402
-from uvmod.core.config import ConfigError, Settings  # noqa: E402
+from uvmod.config import ConfigError, Settings  # noqa: E402
 from uvmod.game import Game, GameError  # noqa: E402
 from uvmod.mcp import Server, tools_for  # noqa: E402
 
@@ -97,7 +97,7 @@ class SettingsAndCatalog(unittest.TestCase):
         try:
             s = d.settings()
             self.assertTrue(s.is_cet)
-            self.assertEqual(s.ue4ss, str(d.cet))
+            self.assertEqual(s.root, str(d.cet))
             with self.assertRaises(ConfigError):
                 Settings.load(dict(d.env, UVMOD_UE4SS="/somewhere"))
             with self.assertRaises(ConfigError):

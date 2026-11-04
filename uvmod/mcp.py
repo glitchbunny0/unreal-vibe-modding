@@ -11,8 +11,8 @@ import traceback
 from typing import Any
 
 from . import __version__
+from .config import ConfigError, Settings
 from .core import protocol
-from .core.config import ConfigError, Settings
 from .game import Game, GameError, timeout_message
 from .census import Census
 from .inputs import Input, press_key
@@ -411,7 +411,7 @@ class Server:
         """The engine the settings name; UE4SS when they cannot be read yet (the tools then say what is missing)."""
         if self._engine is None:
             try:
-                self._engine = Settings.load().engine
+                self._engine = Settings.load().engine.name
             except ConfigError:
                 return "ue4ss"
         return self._engine
@@ -430,8 +430,8 @@ class Server:
 
             settings = Settings.load()
             if args.get("action") == "note":
-                return text(notes.add(settings.ue4ss, str(args.get("text") or "")))
-            return text(notes.read(settings.ue4ss))
+                return text(notes.add(settings.root, str(args.get("text") or "")))
+            return text(notes.read(settings.root))
         if name == "api":
             from .cli import api_answer, open_index
             from .lint import check_paths

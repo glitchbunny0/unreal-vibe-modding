@@ -46,7 +46,7 @@ class SshTransport(Transport):
             raise TransportError("UVMOD_HOST is not set (ssh transport)")
         self.ssh = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", settings.host]
         self.retries = 0  # sessions started again because they never read their input
-        self.u = psq(settings.ue4ss)
+        self.u = psq(settings.root)
         e = self.engine
         self.prelude = f"""$u = {self.u}
 $repl = Join-Path $u {psq(e.repl)}; $logf = Join-Path $u {psq(e.log)}; $mods = Join-Path $u {psq(e.mods)}

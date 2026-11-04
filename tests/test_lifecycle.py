@@ -18,7 +18,7 @@ from fake_game import FakeGame  # noqa: E402
 from test_client import GameDir  # noqa: E402
 from uvmod import cli  # noqa: E402
 from uvmod.core import journal  # noqa: E402
-from uvmod.core.config import Settings  # noqa: E402
+from uvmod.config import Settings  # noqa: E402
 from uvmod.core.minidump import parse_minidump  # noqa: E402
 from uvmod.core.transports.local import LocalTransport  # noqa: E402
 from uvmod.crash import parse_crash_context  # noqa: E402
