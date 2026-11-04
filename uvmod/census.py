@@ -7,6 +7,7 @@ import re
 import time
 
 from . import helpers
+from .core import protocol
 from .game import Game
 from .inputs import Input
 
@@ -48,11 +49,11 @@ class Census:
     def start(self, refs: list[str], native: bool = False, pattern: str | None = None) -> str:
         if not refs:
             raise ValueError("name what to count: object references or class paths (pawn, pc, first:BP_Door_C, ...)")
-        specs = "{" + ", ".join(helpers.lua_string(r) for r in refs) + "}"
+        specs = "{" + ", ".join(protocol.lua_string(r) for r in refs) + "}"
         # inspect's resolve() knows pc / pawn / first: / cdo: / class:; make sure it is there.
         helpers.call(self.game, self.mod, helpers.INSPECT, "true", 3000)
         which = '"all"' if native else '"bp"'
-        filt = helpers.lua_string(pattern) if pattern else "nil"
+        filt = protocol.lua_string(pattern) if pattern else "nil"
         return render(self._call(f"__uvmod_census.start({specs}, {which}, {filt})", 5000))
 
     def mark(self, limit: int = 40) -> str:

@@ -1,4 +1,5 @@
-"""The LuaRepl protocol (docs/protocol.md): request and answer messages, ids, and their text rendering."""
+"""The LuaRepl protocol (docs/protocol.md): request and answer messages, ids, their text rendering, and the Lua
+literals the requests' code carries."""
 
 from __future__ import annotations
 
@@ -76,3 +77,43 @@ def render_text(answer: dict[str, Any]) -> str:
     if answer.get("truncated"):
         lines.append("(truncated: the game keeps at most 64 values, 4 KiB each, and 64 KiB of prints)")
     return "\n".join(lines)
+
+
+def lua_string(text: str) -> str:
+    """A Lua string literal for any text: printable ASCII stays, every other byte becomes a decimal escape."""
+    out = []
+    for byte in text.encode("utf-8"):
+        if byte in (0x22, 0x5C):
+            out.append("\\" + chr(byte))
+        elif 0x20 <= byte < 0x7F:
+            out.append(chr(byte))
+        else:
+            out.append(f"\\{byte:03d}")
+    return '"' + "".join(out) + '"'
+
+
+def lua_value(value) -> str:
+    """A Lua literal for a JSON value: null -> nil, lists -> sequences, objects -> tables with string keys."""
+    if value is None:
+        return "nil"
+    if value is True:
+        return "true"
+    if value is False:
+        return "false"
+    if isinstance(value, (int, float)):
+        return repr(value)
+    if isinstance(value, str):
+        return lua_string(value)
+    if isinstance(value, (list, tuple)):
+        return "{" + ", ".join(lua_value(v) for v in value) + "}"
+    if isinstance(value, dict):
+        parts = []
+        for k, v in value.items():
+            key = k if re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", str(k)) else f"[{lua_string(str(k))}]"
+            parts.append(f"{key} = {lua_value(v)}")
+        return "{" + ", ".join(parts) + "}"
+    raise ValueError(f"cannot pass {type(value).__name__} to Lua")
+
+
+def lua_args(values) -> str:
+    return ", ".join(lua_value(v) for v in values)

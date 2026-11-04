@@ -10,7 +10,8 @@ import re
 from dataclasses import dataclass
 from importlib import resources
 
-from .game import Game, GameError, timeout_message
+from .core.session import GameError
+from .game import Game, timeout_message
 
 NEED_HELPER = "uvmod: send the helper"
 
@@ -64,46 +65,6 @@ WATCH = Helper("watch.lua", "__uvmod")
 INSPECT = Helper("inspect.lua", "__uvmod_inspect")
 INPUT = Helper("input.lua", "__uvmod_input")
 CENSUS = Helper("census.lua", "__uvmod_census")
-
-
-def lua_string(text: str) -> str:
-    """A Lua string literal for any text: printable ASCII stays, every other byte becomes a decimal escape."""
-    out = []
-    for byte in text.encode("utf-8"):
-        if byte in (0x22, 0x5C):
-            out.append("\\" + chr(byte))
-        elif 0x20 <= byte < 0x7F:
-            out.append(chr(byte))
-        else:
-            out.append(f"\\{byte:03d}")
-    return '"' + "".join(out) + '"'
-
-
-def lua_value(value) -> str:
-    """A Lua literal for a JSON value: null -> nil, lists -> sequences, objects -> tables with string keys."""
-    if value is None:
-        return "nil"
-    if value is True:
-        return "true"
-    if value is False:
-        return "false"
-    if isinstance(value, (int, float)):
-        return repr(value)
-    if isinstance(value, str):
-        return lua_string(value)
-    if isinstance(value, (list, tuple)):
-        return "{" + ", ".join(lua_value(v) for v in value) + "}"
-    if isinstance(value, dict):
-        parts = []
-        for k, v in value.items():
-            key = k if re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", str(k)) else f"[{lua_string(str(k))}]"
-            parts.append(f"{key} = {lua_value(v)}")
-        return "{" + ", ".join(parts) + "}"
-    raise ValueError(f"cannot pass {type(value).__name__} to Lua")
-
-
-def lua_args(values) -> str:
-    return ", ".join(lua_value(v) for v in values)
 
 
 def call(game: Game, mod: str | None, helper: Helper, expr: str, limit_ms: int = 2000) -> list[str]:

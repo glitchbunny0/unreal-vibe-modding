@@ -15,21 +15,23 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from test_bridge_e2e import HAVE_LUA, LUA, BridgeHarness  # noqa: E402
 from uvmod import cli, helpers  # noqa: E402
+from uvmod.core import protocol  # noqa: E402
 from uvmod.census import Census  # noqa: E402
 from uvmod.inputs import Input, parse_value  # noqa: E402
 from uvmod.mcp import Server  # noqa: E402
 from uvmod.reflection import Inspector, parse_cli_args, render  # noqa: E402
-from uvmod.watch import LuaError, lua_string  # noqa: E402
+from uvmod.core.protocol import lua_string  # noqa: E402
+from uvmod.watch import LuaError  # noqa: E402
 
 PLANK = "first:BP_Plank_C"
 
 
 class Pure(unittest.TestCase):
     def test_lua_value(self):
-        self.assertEqual(helpers.lua_args([None, True, 2, 2.5, "a\"b", [1, "x"], {"X": 1, "two words": 2}]),
+        self.assertEqual(protocol.lua_args([None, True, 2, 2.5, "a\"b", [1, "x"], {"X": 1, "two words": 2}]),
                          'nil, true, 2, 2.5, "a\\"b", {1, "x"}, {X = 1, ["two words"] = 2}')
         with self.assertRaises(ValueError):
-            helpers.lua_value(object())
+            protocol.lua_value(object())
 
     def test_cli_args(self):
         self.assertEqual(parse_cli_args(["2.5", "true", '{"X": 1}', "RightHand", "first:Pawn"]),

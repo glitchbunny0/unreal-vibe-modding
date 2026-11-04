@@ -13,7 +13,8 @@ from typing import Any
 from . import __version__
 from .config import ConfigError, Settings
 from .core import protocol
-from .game import Game, GameError, timeout_message
+from .core.session import GameError
+from .game import Game
 from .census import Census
 from .inputs import Input, press_key
 from .reflection import Inspector, render
@@ -423,7 +424,7 @@ class Server:
         if name == "cet":
             from . import cet
 
-            answer = self._game().cet_query(str(args.get("handler") or ""), args.get("args") or {}, args.get("mod") or None)
+            answer = self._game().query(str(args.get("handler") or ""), args.get("args") or {}, args.get("mod") or None)
             return text(cet.render(answer), not answer.get("ok"))
         if name == "api" and args.get("action") in ("notes", "note"):
             from . import notes

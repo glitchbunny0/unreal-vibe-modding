@@ -23,7 +23,8 @@ sys.path.insert(0, str(ROOT))
 from uvmod import cet, cli  # noqa: E402
 from uvmod.core import engine  # noqa: E402
 from uvmod.config import ConfigError, Settings  # noqa: E402
-from uvmod.game import Game, GameError  # noqa: E402
+from uvmod.core.session import GameError  # noqa: E402
+from uvmod.game import Game  # noqa: E402
 from uvmod.mcp import Server, tools_for  # noqa: E402
 
 LUA54 = os.environ.get("LUA") or shutil.which("lua5.4") or shutil.which("lua")
@@ -239,13 +240,13 @@ class CetBridgeHarness:
         self.assertEqual("".join(v[1:-1] for v in values), "\u00e9" * 5000)
 
     def test_cet_handlers(self):
-        answer = self.game.cet_query("player_info")
+        answer = self.game.query("player_info")
         self.assertTrue(answer["ok"], answer)
         self.assertEqual(answer["result"]["level"], 57)
         self.assertEqual(answer["result"]["position"], {"x": -1050.25, "y": 1340.5, "z": 30})
         # cetbridge_fixes: absolute health beside the percentage, not the percentage as "health"
         self.assertEqual((answer["result"]["health"], answer["result"]["healthPercent"]), (432, 89))
-        self.assertIn("unknown handler", self.game.cet_query("nope")["error"])
+        self.assertIn("unknown handler", self.game.query("nope")["error"])
         code, out, _ = run_cli(["cet", "player_info"])
         self.assertEqual(code, 0)
         self.assertEqual(json.loads(out)["streetCred"], 50)
@@ -254,37 +255,37 @@ class CetBridgeHarness:
 
     def test_fixed_handlers(self):
         # out parameters come back as (success, list): the list is used, not the boolean
-        inv = self.game.cet_query("get_inventory")["result"]
+        inv = self.game.query("get_inventory")["result"]
         self.assertEqual(inv["total"], 2)
         self.assertEqual(inv["items"][0], {"id": "Items.money", "name": "Eurodollars", "quantity": 340925, "type": "gamedataItem_Record"})
-        weapons = self.game.cet_query("get_inventory", {"type": "Weapon"})["result"]["items"]
+        weapons = self.game.query("get_inventory", {"type": "Weapon"})["result"]["items"]
         self.assertEqual([i["name"] for i in weapons], ["Satori"])
         # the Complete targeting set, each entity once, without the player, kinds from the class hierarchy (WkMCP #12)
-        near = self.game.cet_query("get_nearby_entities")["result"]
+        near = self.game.query("get_nearby_entities")["result"]
         self.assertEqual([(e["className"], e["type"], e.get("name"), e["distance"]) for e in near["entities"]],
                          [("vehicleCarBaseObject", "Vehicle", "Cortes V5000 Valor", 5.0), ("VendingMachine", "Device", "Vending Machine", 12.0)])
-        self.assertEqual(self.game.cet_query("get_nearby_entities", {"type": "Device"})["result"]["count"], 1)
-        scan = self.game.cet_query("get_scanner_info")["result"]
+        self.assertEqual(self.game.query("get_nearby_entities", {"type": "Device"})["result"]["count"], 1)
+        scan = self.game.query("get_scanner_info")["result"]
         self.assertEqual((scan["displayName"], scan["currentHealth"], scan["healthPercent"]), ("Cortes V5000 Valor", 432, 89))
         # teleport: EulerAngles keeping the player's heading, not a quaternion's missing IsValid (WkMCP #12)
-        self.assertTrue(self.game.cet_query("teleport", {"x": 1, "y": 2, "z": 3})["result"]["success"])
+        self.assertTrue(self.game.query("teleport", {"x": 1, "y": 2, "z": 3})["result"]["success"])
         self.assertEqual(json.loads(self.exec("vb.json(FakeTeleports)")["values"][0][1:-1])[0],
                          {"angles": {"pitch": 0, "roll": 0, "yaw": 37.5}, "pos": {"w": 1, "x": 1, "y": 2, "z": 3}})
         # TweakDB search needs a record type; short names work, and records without a name have none
-        found = self.game.cet_query("search_tweakdb", {"pattern": "KATANA"})["result"]
+        found = self.game.query("search_tweakdb", {"pattern": "KATANA"})["result"]
         self.assertEqual([(r["path"], r.get("name")) for r in found["results"]],
                          [("Items.Preset_Katana_Saburo", "Satori"), ("Items.w_katana_blade", None)])
-        found = self.game.cet_query("search_tweakdb", {"pattern": "quadra", "type": "Vehicle"})["result"]
+        found = self.game.query("search_tweakdb", {"pattern": "quadra", "type": "Vehicle"})["result"]
         self.assertEqual(found["results"][0]["type"], "gamedataVehicle_Record")
         # DumpType's text, parsed and filtered
-        d = self.game.cet_query("dump_type", {"typeName": "PlayerPuppet"})["result"]
+        d = self.game.query("dump_type", {"typeName": "PlayerPuppet"})["result"]
         self.assertEqual(d["functions"], ["IsInCombat() => (Bool)", "GetLevel(Int32, Bool) => (Float)"])
         self.assertEqual(d["properties"], ["quickSlotsManager: handle:QuickSlotsManager"])
-        self.assertEqual(self.game.cet_query("dump_type", {"typeName": "PlayerPuppet", "pattern": "combat"})["result"]["functions"],
+        self.assertEqual(self.game.query("dump_type", {"typeName": "PlayerPuppet", "pattern": "combat"})["result"]["functions"],
                          ["IsInCombat() => (Bool)"])
-        self.assertIn("Type not found", self.game.cet_query("dump_type", {"typeName": "Nope"})["error"])
-        self.assertIn("not possible", self.game.cet_query("set_weather", {"weather": "Rain"})["error"])
-        o = self.game.cet_query("overview")["result"]
+        self.assertIn("Type not found", self.game.query("dump_type", {"typeName": "Nope"})["error"])
+        self.assertIn("not possible", self.game.query("set_weather", {"weather": "Rain"})["error"])
+        o = self.game.query("overview")["result"]
         self.assertEqual((o["level"], o["eddies"], o["time"]), (57, 340925, "day 76, 15:46"))
         self.assertEqual(o["position"], {"x": -1050.3, "y": 1340.5, "z": 30})
 

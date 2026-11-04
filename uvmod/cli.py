@@ -13,7 +13,8 @@ from . import __version__
 from .config import CET_APP, UE4SS_APP, ConfigError, Settings
 from .core import journal, protocol
 from .core.config import keys_for
-from .game import UE_ONLY, Game, GameError, timeout_message
+from .core.session import GameError
+from .game import UE_ONLY, Game, timeout_message
 from .census import Census
 from .inputs import Input, parse_value, press_key
 from .reflection import Inspector, parse_cli_args, render
@@ -512,7 +513,9 @@ def main(argv: list[str] | None = None) -> int:
             if not args.handler:
                 print(cet.catalog())
                 return EXIT_OK
-            answer = game.cet_query(args.handler, cet.parse_args(" ".join(args.args)), args.mod)
+            if not game.settings.is_cet:
+                raise GameError("CETBridge's handlers need Cyberpunk 2077 with CET (set UVMOD_CET)")
+            answer = game.query(args.handler, cet.parse_args(" ".join(args.args)), args.mod)
             print(cet.render(answer))
             return EXIT_OK if answer.get("ok") else EXIT_LUA_ERROR
         if args.cmd in ("lua", "run"):

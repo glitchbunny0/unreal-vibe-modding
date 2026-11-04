@@ -7,6 +7,7 @@ import json
 from dataclasses import dataclass, field
 
 from . import helpers
+from .core import protocol
 from .game import Game
 
 
@@ -40,7 +41,7 @@ def parse(lines: list[str]) -> Answer:
 
 
 def _opt(text: str | None) -> str:
-    return helpers.lua_string(text) if text else "nil"
+    return protocol.lua_string(text) if text else "nil"
 
 
 def _bool(flag: bool | None) -> str:
@@ -70,34 +71,34 @@ class Inspector:
         return self._call("__uvmod_inspect.world()")
 
     def find(self, spec: str, limit: int = 50) -> Answer:
-        return self._call(f"__uvmod_inspect.find({helpers.lua_string(spec)}, {int(limit)})")
+        return self._call(f"__uvmod_inspect.find({protocol.lua_string(spec)}, {int(limit)})")
 
     def props(self, ref: str, pattern: str | None = None, inherited: bool = True, limit: int = 400) -> Answer:
-        return self._call(f"__uvmod_inspect.props({helpers.lua_string(ref)}, {_opt(pattern)}, {_bool(inherited)}, {int(limit)})")
+        return self._call(f"__uvmod_inspect.props({protocol.lua_string(ref)}, {_opt(pattern)}, {_bool(inherited)}, {int(limit)})")
 
     def functions(self, ref: str, pattern: str | None = None, inherited: bool = True, limit: int = 300) -> Answer:
-        return self._call(f"__uvmod_inspect.functions({helpers.lua_string(ref)}, {_opt(pattern)}, {_bool(inherited)}, {int(limit)})")
+        return self._call(f"__uvmod_inspect.functions({protocol.lua_string(ref)}, {_opt(pattern)}, {_bool(inherited)}, {int(limit)})")
 
     def signature(self, ref: str, name: str) -> Answer:
-        return self._call(f"__uvmod_inspect.signature({helpers.lua_string(ref)}, {helpers.lua_string(name)})")
+        return self._call(f"__uvmod_inspect.signature({protocol.lua_string(ref)}, {protocol.lua_string(name)})")
 
     def classes(self, pattern: str | None = None, base: str | None = None, kind: str = "class", limit: int = 200) -> Answer:
-        return self._call(f"__uvmod_inspect.classes({_opt(pattern)}, {_opt(base)}, {helpers.lua_string(kind)}, {int(limit)})",
+        return self._call(f"__uvmod_inspect.classes({_opt(pattern)}, {_opt(base)}, {protocol.lua_string(kind)}, {int(limit)})",
                           limit_ms=5000)
 
     def call(self, ref: str, name: str, args: list | None = None, lua_args: str | None = None,
              limit_ms: int = 2000) -> Answer:
         if args and lua_args:
             raise ValueError("pass either args or lua_args, not both")
-        src = lua_args if lua_args else helpers.lua_args(args or [])
-        return self._call(f"__uvmod_inspect.call({helpers.lua_string(ref)}, {helpers.lua_string(name)}, "
-                          f"{helpers.lua_string(src)})", limit_ms)
+        src = lua_args if lua_args else protocol.lua_args(args or [])
+        return self._call(f"__uvmod_inspect.call({protocol.lua_string(ref)}, {protocol.lua_string(name)}, "
+                          f"{protocol.lua_string(src)})", limit_ms)
 
     def snapshot(self, label: str, ref: str, pattern: str | None = None) -> Answer:
-        return self._call(f"__uvmod_inspect.snapshot({helpers.lua_string(label)}, {helpers.lua_string(ref)}, {_opt(pattern)})")
+        return self._call(f"__uvmod_inspect.snapshot({protocol.lua_string(label)}, {protocol.lua_string(ref)}, {_opt(pattern)})")
 
     def diff(self, label: str, ref: str | None = None, update: bool = False) -> Answer:
-        return self._call(f"__uvmod_inspect.diff({helpers.lua_string(label)}, {_opt(ref)}, {_bool(update)})")
+        return self._call(f"__uvmod_inspect.diff({protocol.lua_string(label)}, {_opt(ref)}, {_bool(update)})")
 
     def snapshots(self) -> Answer:
         return self._call("__uvmod_inspect.snapshots()")

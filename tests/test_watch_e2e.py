@@ -17,8 +17,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from test_bridge_e2e import HAVE_LUA, BridgeHarness  # noqa: E402
 from test_client import ROOT  # noqa: E402
 from uvmod import cli  # noqa: E402
-from uvmod.game import GameError  # noqa: E402
-from uvmod.watch import LuaError, Watcher, lua_string, render_events, render_watches  # noqa: E402
+from uvmod.core.session import GameError  # noqa: E402
+from uvmod.core.protocol import lua_string  # noqa: E402
+from uvmod.watch import LuaError, Watcher, render_events, render_watches  # noqa: E402
 
 GRAB = "/Game/Fake/BP_Plank.BP_Plank_C:Grab"
 NATIVE = "/Script/Engine.Actor:K2_DestroyActor"

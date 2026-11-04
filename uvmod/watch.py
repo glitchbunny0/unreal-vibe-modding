@@ -9,8 +9,10 @@ import time
 from dataclasses import dataclass, field
 
 from . import helpers
-from .game import Game, GameError, timeout_message
-from .helpers import LuaError, lua_string  # noqa: F401  (part of this module's interface)
+from .core.protocol import lua_string
+from .core.session import GameError
+from .game import Game, timeout_message
+from .helpers import LuaError  # noqa: F401  (part of this module's interface)
 
 ID_PATTERN = re.compile(r"^[A-Za-z0-9_.-]{1,40}$")
 MAX_WAIT_SECONDS = 600.0

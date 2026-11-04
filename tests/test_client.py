@@ -21,7 +21,8 @@ from fake_game import FakeGame  # noqa: E402
 from uvmod import cli  # noqa: E402
 from uvmod.core import protocol  # noqa: E402
 from uvmod.config import ConfigError, Settings  # noqa: E402
-from uvmod.game import Game, GameError  # noqa: E402
+from uvmod.core.session import GameError  # noqa: E402
+from uvmod.game import Game  # noqa: E402
 
 TRICKY = 'return "quote \\" backslash \\\\ tab\t newline\n unicode \u00e9\u2603 \U0001f600 nul-ish \x01"'
 

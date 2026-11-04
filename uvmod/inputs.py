@@ -4,6 +4,7 @@ test a mod's controls without a person at the keyboard."""
 from __future__ import annotations
 
 from . import helpers
+from .core import protocol
 from .game import Game
 
 
@@ -30,7 +31,7 @@ class Input:
     def list(self, pattern: str | None = None) -> str:
         rows = []
         for line in helpers.call(self.game, self.mod, helpers.INPUT,
-                                 f"__uvmod_input.list({helpers.lua_string(pattern) if pattern else 'nil'})", 2000):
+                                 f"__uvmod_input.list({protocol.lua_string(pattern) if pattern else 'nil'})", 2000):
             kind, _, rest = line.partition("\t")
             if kind == "A":
                 name, vtype, path = (rest.split("\t") + ["", ""])[:3]
@@ -41,7 +42,7 @@ class Input:
 
     def press(self, action: str, value: tuple[float, float, float] = (1.0, 0.0, 0.0), hold_ms: int = 0) -> str:
         x, y, z = value
-        return self._call(f"__uvmod_input.press({helpers.lua_string(action)}, {x!r}, {y!r}, {z!r}, {int(hold_ms)})")
+        return self._call(f"__uvmod_input.press({protocol.lua_string(action)}, {x!r}, {y!r}, {z!r}, {int(hold_ms)})")
 
     def stop(self) -> str:
         return self._call("__uvmod_input.stop()")

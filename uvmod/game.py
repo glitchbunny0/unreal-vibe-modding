@@ -1,4 +1,5 @@
-"""The core shared by the CLI and the MCP server: one running game, reached through a transport."""
+"""The app's game: UE4SS in an Unreal Engine game, and — until it moves out for good — the branches for Cyber Engine
+Tweaks, each a single `if self.settings.is_cet:` delegating to a function of its own, so they can be lifted out whole."""
 
 from __future__ import annotations
 
@@ -7,12 +8,10 @@ import shutil
 import subprocess
 import tempfile
 import time
-from dataclasses import dataclass
-from typing import Any, Iterator
 
 from .core import journal, protocol
-from .core.config import Settings
-from .core.transports import Status, Transport, make
+from .core.protocol import lua_string
+from .core.session import GameError, Session
 
 UE_ONLY = "this needs UE4SS (an Unreal Engine game); with CET, use `lua` (Lua in VibeBridge) or `cet` (CETBridge's handlers)"
 
@@ -27,21 +26,6 @@ def screenshot_lua(ui: bool = True) -> str:
     return ('local pc = FindFirstOf("PlayerController") '
             f'StaticFindObject("/Script/Engine.Default__KismetSystemLibrary"):ExecuteConsoleCommand(pc, "{command}", pc) '
             'return "ok"')
-
-
-class GameError(Exception):
-    pass
-
-
-@dataclass
-class Result:
-    delivery: str
-    answer: dict[str, Any] | None
-    elapsed_s: float
-
-    @property
-    def ok(self) -> bool:
-        return bool(self.answer and self.answer.get("ok"))
 
 
 def timeout_message(delivery: str, seconds: float, cet: bool = False) -> str:
@@ -63,90 +47,18 @@ def timeout_message(delivery: str, seconds: float, cet: bool = False) -> str:
             "and VibeBridge is not running, or the game thread is stuck.")
 
 
-class Game:
-    def __init__(self, settings: Settings, transport: Transport | None = None):
-        self.settings = settings
-        self.transport = transport or make(settings)
-
-    def no_answer(self, delivery: str, seconds: float | None = None) -> str:
-        """Why nothing answered, in this engine's terms."""
-        return timeout_message(delivery, self.settings.timeout if seconds is None else seconds, self.settings.is_cet)
-
-    def request(self, request: dict[str, Any], timeout: float | None = None) -> Result:
-        request_id = protocol.new_id()
-        wait = self.settings.timeout if timeout is None else timeout
-        journal.record(self.settings, {"id": request_id, "op": request.get("op"), "mod": request.get("mod", ""),
-                                       "code": journal.short_code(str(request.get("code", "")))})
-        t0 = time.monotonic()
-        try:
-            ex = self.transport.exchange(request_id, protocol.encode(request), protocol.encode(request, request_id), wait)
-        except Exception as e:
-            journal.record(self.settings, {"id": request_id, "done": "failed", "error": f"{type(e).__name__}: {e}"[:300]})
-            raise
-        elapsed = time.monotonic() - t0
-        if ex.answer is None:
-            journal.record(self.settings, {"id": request_id, "done": "timeout", "ms": round(elapsed * 1000)})
-            return Result(ex.delivery, None, elapsed)
-        answer = protocol.parse_answer(ex.answer)
-        journal.record(self.settings, {"id": request_id, "done": "ok" if answer.get("ok") else "error",
-                                       "ms": round(elapsed * 1000), "error": str(answer.get("error", ""))[:300]})
-        return Result(ex.delivery, answer, elapsed)
-
-    def mods(self) -> Result:
-        return self.request(protocol.list_request())
-
-    def resolve_mod(self, mod: str | None) -> str:
-        """The mod to run code in: the one given, UVMOD_MOD, or the only mod the game offers."""
-        if mod or self.settings.mod:
-            return mod or self.settings.mod
-        listed = self.mods()
-        if not listed.answer:
-            raise GameError(self.no_answer(listed.delivery))
-        names = listed.answer.get("mods", [])
-        if len(names) == 1:
-            return names[0]
-        raise GameError(f"several mods can run code; pick one with --mod or UVMOD_MOD: {', '.join(names)}")
-
-    def exec(self, code: str, mod: str | None = None, limit_ms: int | None = None) -> Result:
-        target = self.resolve_mod(mod)
-        limit = limit_ms if limit_ms is not None else self.settings.limit_ms
-        return self.request(protocol.exec_request(target, code, limit))
-
-    def status(self) -> Status:
-        return self.transport.status(self.transport.engine.status_pattern)
-
-    def log(self, lines: int = 40, pattern: str = "") -> list[str]:
-        return self.transport.log(lines, pattern)
-
-    def follow(self, pattern: str = "") -> Iterator[str]:
-        return self.transport.follow(pattern)
-
-    def push(self, local_dir: str) -> str:
-        if not os.path.isdir(local_dir):
-            raise GameError(f"not a directory: {local_dir}")
-        return self.transport.push(local_dir.rstrip("/\\"))
-
-    def swap(self, local_dir: str) -> tuple[bool, str]:
-        """Push a hot-swap-shell mod and swap its logic in place. (ok, the shell's answer or why there was none)."""
-        if not os.path.isdir(local_dir):
-            raise GameError(f"not a directory: {local_dir}")
-        local_dir = local_dir.rstrip("/\\")
-        answer = self.transport.swap(local_dir, protocol.new_id(), self.settings.timeout)
-        if answer is None:
-            return False, (f"TIMEOUT after {self.settings.timeout:g}s: the files are pushed, but the running "
-                           f"{os.path.basename(local_dir)} did not answer. It is not a hot-swap shell yet (restart the "
-                           "game once to load it), or the game thread is stuck.")
-        return answer.startswith("OK"), answer.strip()
+class Game(Session):
+    def timeout_message(self, delivery: str, seconds: float) -> str:
+        if self.settings.is_cet:
+            return timeout_message(delivery, seconds, cet=True)
+        return timeout_message(delivery, seconds)
 
     def screenshot(self, out: str | None = None, mod: str | None = None, ui: bool = True) -> str:
         """Take an engine screenshot, with the game's UI unless `ui` is false, copy it here, scale it to 1280 px wide if
         ffmpeg exists. Returns the path. With CET (no screenshot call of its own) the game's window is copied from the
         screen instead, always with its UI, and only while the game is the window in front."""
         if self.settings.is_cet:
-            out = out or os.path.join(tempfile.gettempdir(), time.strftime("uvmod-shot-%H%M%S.jpg"))
-            png = os.path.splitext(out)[0] + ".png"
-            self.transport.capture(png)
-            return self._scaled(png, out)
+            return self.window_screenshot(out)
         before = self.transport.newest_shot()
         result = self.exec(screenshot_lua(ui), mod)
         if not result.ok:
@@ -165,20 +77,8 @@ class Game:
         self.transport.fetch(now[0], png)
         return self._scaled(png, out)
 
-    @staticmethod
-    def _scaled(png: str, out: str) -> str:
-        """`out` as a 1280 px wide JPEG made from `png` if ffmpeg is here (the PNG is then removed), else the PNG."""
-        if shutil.which("ffmpeg") and not out.endswith(".png"):
-            done = subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-i", png, "-vf", "scale=1280:-1", out])
-            if done.returncode == 0:
-                os.remove(png)
-                return out
-        return png
-
     def console(self, command: str, mod: str | None = None) -> str:
         """Run an engine console command as the local player (open a map, ...). Shipping builds compile many out."""
-        from .helpers import lua_string
-
         if self.settings.is_cet:
             raise GameError(UE_ONLY)
         if not command.strip():
@@ -190,6 +90,18 @@ class Game:
         if not result.ok:
             raise GameError(protocol.render_text(result.answer) if result.answer else timeout_message(result.delivery, self.settings.timeout))
         return f"ran: {command}"
+
+    def swap(self, local_dir: str) -> tuple[bool, str]:
+        """Push a hot-swap-shell mod and swap its logic in place. (ok, the shell's answer or why there was none)."""
+        if not os.path.isdir(local_dir):
+            raise GameError(f"not a directory: {local_dir}")
+        local_dir = local_dir.rstrip("/\\")
+        answer = self.transport.swap(local_dir, protocol.new_id(), self.settings.timeout)
+        if answer is None:
+            return False, (f"TIMEOUT after {self.settings.timeout:g}s: the files are pushed, but the running "
+                           f"{os.path.basename(local_dir)} did not answer. It is not a hot-swap shell yet (restart the "
+                           "game once to load it), or the game thread is stuck.")
+        return answer.startswith("OK"), answer.strip()
 
     def burst(self, count: int = 6, every_ms: int = 200, out: str | None = None, mod: str | None = None,
               ui: bool = True) -> str:
@@ -254,34 +166,7 @@ return "ok"
                 return out
         return folder
 
-    # --- starting and stopping the game, and what to do when it died ---------------------------------------------
-
-    def launch(self) -> str:
-        return self.transport.launch()
-
-    def stop(self) -> str:
-        return self.transport.stop()
-
-    def ready(self, timeout: float = 180.0) -> tuple[bool, str]:
-        """Wait until a REPL answers: the game is up and its Lua mods have started. (ok, what happened)."""
-        t0 = time.monotonic()
-        saved, self.settings.timeout = self.settings.timeout, 3.0
-        try:
-            tries = 0
-            while True:
-                tries += 1
-                listed = self.mods()
-                elapsed = time.monotonic() - t0
-                if listed.answer and listed.answer.get("ok"):
-                    who = "VibeBridge" if listed.delivery == "bridge" else "UE4SS external REPL"
-                    return True, f"ready after {elapsed:.0f} s ({who}; mods: {', '.join(listed.answer.get('mods', []))})"
-                if elapsed >= timeout:
-                    return False, f"NOT READY after {elapsed:.0f} s: {self.no_answer(listed.delivery, 3.0)}"
-                if elapsed > 30 and tries % 5 == 0 and self.status().running is False:
-                    return False, f"the game is not running ({elapsed:.0f} s after waiting began); see: uvmod crash"
-                time.sleep(2.0)
-        finally:
-            self.settings.timeout = saved
+    # --- the crash report ------------------------------------------------------------------------------------------
 
     def crash_report(self, journal_count: int = 6) -> str:
         """Everything that says why the game died: is it running, the newest crash folder (Unreal's CrashContext and
@@ -409,26 +294,6 @@ return "ok"
         if entries and st.running is False and entries[-1].get("done") in (None, "timeout", "failed"):
             out.append("  -> the last request got no answer and the game is gone: it most likely killed the game.")
         return "\n".join(out)
-
-    def cet_query(self, handler: str, args: dict | None = None, mod: str | None = None) -> dict:
-        """Run one of CETBridge's game handlers in VibeBridge (CET): {"ok": true, "result": ...} or {"ok": false,
-        "error": ...}. Raises GameError when nothing answered or the Lua around the handler failed."""
-        import json as _json
-
-        from .helpers import lua_string, lua_value
-
-        if not self.settings.is_cet:
-            raise GameError("CETBridge's handlers need Cyberpunk 2077 with CET (set UVMOD_CET)")
-        result = self.exec(f"return vb.query({lua_string(handler)}, {lua_value(args or {})})", mod)
-        if result.answer is None:
-            raise GameError(self.no_answer(result.delivery))
-        if not result.ok:
-            raise GameError(str(result.answer.get("error", "")))
-        text = "".join(v[1:-1] if len(v) >= 2 and v[0] == '"' and v[-1] == '"' else v for v in result.answer.get("values", []))
-        try:
-            return _json.loads(text)
-        except ValueError as e:
-            raise GameError(f"VibeBridge's answer is not JSON ({e}): {text[:200]}") from None
 
     # --- the reflection index -------------------------------------------------------------------------------------
 
