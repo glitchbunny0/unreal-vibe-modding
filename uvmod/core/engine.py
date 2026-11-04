@@ -20,6 +20,9 @@ class Engine:
     bridge_marker: str  # exists when VibeBridge is installed, relative to the root
     reporter: str  # the engine's crash reporter process, closed by `stop`
     process: str = ""  # the game's process name when it is fixed ("" = find it)
+    exe: tuple = ()  # the game's exe relative to the root, which `launch` starts directly (empty: Steam only)
+    crash_dir: str = ""  # where crash folders are: "saved:<sub>" under Saved, "localappdata:<sub>" under LocalAppData
+    status_pattern: str = ""  # the log lines `status` shows, valid in Python and .NET regular expressions
 
 
 UE4SS = Engine(
@@ -30,6 +33,9 @@ UE4SS = Engine(
     log="UE4SS.log",
     bridge_marker="Mods/VibeBridge/enabled.txt",
     reporter="CrashReportClient",
+    exe=(),  # Steam starts the game
+    crash_dir="saved:Crashes",
+    status_pattern=r"UE4SS - v|\[ExternalLuaRepl\] (?!Request )|\[VibeBridge\]|loaded WITHOUT logic|swapped logic|swap REFUSED",
 )
 
 CET = Engine(
@@ -41,6 +47,9 @@ CET = Engine(
     bridge_marker="mods/VibeBridge/init.lua",
     reporter="REDEngineErrorReporter",
     process="Cyberpunk2077",
+    exe=("..", "..", "Cyberpunk2077.exe"),  # the CET folder is <game>/bin/x64/plugins/cyber_engine_tweaks: two up is the game's exe
+    crash_dir="localappdata:REDEngine/ReportQueue",
+    status_pattern=r"\[VibeBridge\]|Mod .* (loaded|failed)|Ignoring mod|LuaVM: Reloaded|Tried to access invalid",
 )
 
 ENGINES = {e.name: e for e in (UE4SS, CET)}
@@ -48,7 +57,3 @@ ENGINES = {e.name: e for e in (UE4SS, CET)}
 
 def get(name: str) -> Engine:
     return ENGINES[name]
-
-
-# CET's folder is <game>/bin/x64/plugins/cyber_engine_tweaks; the game's exe is two levels up.
-CET_EXE_FROM_ROOT = ("..", "..", "Cyberpunk2077.exe")

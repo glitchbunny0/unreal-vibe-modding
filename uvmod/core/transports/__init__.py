@@ -86,7 +86,7 @@ class Transport:
 
     def crash_files(self) -> dict:
         """The newest crash evidence: {"folders": [{"path", "time", "files"}], "dumps": [{"path", "time"}]}, newest first.
-        Folders are Unreal's Saved/Crashes/<id> (UE4SS), or REDEngine's ReportQueue/<id> (CET); dumps are UE4SS's own
+        Folders are the engine's crash folders (Engine.crash_dir says where); dumps are the loader folder's own
         crash_*.dmp. Times are Unix seconds."""
         raise NotImplementedError
 
@@ -94,15 +94,15 @@ class Transport:
         raise NotImplementedError
 
     def bridge_info(self) -> dict | None:
-        """VibeBridge's heartbeat (bridge.json in the LuaRepl folder): its version and, with CET, CET's version and the
-        number of game handlers. None when there is none."""
+        """VibeBridge's heartbeat (bridge.json in the LuaRepl folder): its version and, where the loader is not Unreal's,
+        the loader's version and its number of game handlers. None when there is none."""
         raise NotImplementedError
 
     def capture(self, dest: str) -> str:
         """Copy the game's window from the screen into the PNG `dest`, as the player sees it, for engines with no
-        screenshot call of their own (CET). Refuses (TransportError) while another window is in front: the screen would
-        show the player's other programs. Returns a status line. Windows only: the ssh transport, or uvmod on the
-        game's PC."""
+        screenshot call of their own (Cyber Engine Tweaks). Refuses (TransportError) while another window is in front:
+        the screen would show the player's other programs. Returns a status line. Windows only: the ssh transport, or
+        uvmod on the game's PC."""
         raise TransportError("window screenshots need Windows: the ssh transport, or uvmod running on the game's Windows PC")
 
     def press_keys(self, codes: list[int], hold_ms: int) -> str:

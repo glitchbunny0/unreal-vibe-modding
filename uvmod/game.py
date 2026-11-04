@@ -14,12 +14,6 @@ from .core import journal, protocol
 from .core.config import Settings
 from .core.transports import Status, Transport, make
 
-# Log lines `status` shows: the UE4SS version line, ExternalLuaRepl (not its per-request lines, which verbose
-# logging writes for every call), VibeBridge, hot-swap shells. Valid in Python and .NET regular expressions.
-STATUS_PATTERN = r"UE4SS - v|\[ExternalLuaRepl\] (?!Request )|\[VibeBridge\]|loaded WITHOUT logic|swapped logic|swap REFUSED"
-# The same for CET's scripting.log: VibeBridge, mods loading or failing to, reloads.
-CET_STATUS_PATTERN = r"\[VibeBridge\]|Mod .* (loaded|failed)|Ignoring mod|LuaVM: Reloaded|Tried to access invalid"
-
 UE_ONLY = "this needs UE4SS (an Unreal Engine game); with CET, use `lua` (Lua in VibeBridge) or `cet` (CETBridge's handlers)"
 
 # Module names whose addresses count as minidump stack frames (core leaves that choice to the caller): the mod
@@ -119,7 +113,7 @@ class Game:
         return self.request(protocol.exec_request(target, code, limit))
 
     def status(self) -> Status:
-        return self.transport.status(CET_STATUS_PATTERN if self.settings.is_cet else STATUS_PATTERN)
+        return self.transport.status(self.transport.engine.status_pattern)
 
     def log(self, lines: int = 40, pattern: str = "") -> list[str]:
         return self.transport.log(lines, pattern)

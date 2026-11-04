@@ -352,14 +352,15 @@ $png.Replace('\\', '/')
     def launch(self) -> str:
         # A program started over SSH runs in the SSH session, where a game has no desktop. A scheduled task with an
         # interactive principal starts it in the logged-in user's session instead.
+        rel_exe = "\\".join(self.engine.exe)  # the game's exe, relative to the root (empty: Steam starts it)
         script = f"""
 $launch = {psq(self.settings.launch)}
 $appid = {psq(self.settings.appid)}
-$cetexe = {psq('cet' if self.settings.is_cet else '')}
+$rel = {psq(rel_exe)}
 if ($launch) {{ $exe = 'cmd.exe'; $arg = '/c ' + $launch }}
-elseif ($cetexe -and -not $appid) {{
-  # Cyberpunk 2077: start the game's own exe (GOG runs it as is; a Steam copy hands itself over to Steam).
-  $exe = [IO.Path]::GetFullPath((Join-Path $u '..\\..\\Cyberpunk2077.exe'))
+elseif ($rel -and -not $appid) {{
+  # start the game's own exe (GOG runs it as is; a Steam copy hands itself over to Steam)
+  $exe = [IO.Path]::GetFullPath((Join-Path $u $rel))
   if (-not (Test-Path $exe)) {{ 'ERROR: no game exe at ' + $exe + ' (set UVMOD_LAUNCH)'; exit 0 }}
   $arg = $null
 }}
@@ -414,12 +415,17 @@ if (Get-Game) {{ "$proc is still running" }} else {{ "stopped $proc$closed" }}
     # --- crashes --------------------------------------------------------------------------------------------------
 
     def crash_files(self) -> dict:
+        scheme, _, sub = self.engine.crash_dir.partition(":")
+        if scheme == "localappdata":
+            crashes = f"$c = Join-Path $env:LOCALAPPDATA {psq(sub.replace('/', chr(92)))}"
+        else:
+            crashes = (f"if ($proc) {{ $c = Join-Path $env:LOCALAPPDATA (($proc -replace '-(Win64|WinGDK)-Shipping$', '') "
+                       f"+ '\\Saved\\{sub}') }}")
         script = f"""
 function T($i) {{ [DateTimeOffset]::new($i.LastWriteTimeUtc).ToUnixTimeSeconds() }}
 $r = [ordered]@{{ folders = @(); dumps = @() }}
 $c = $null
-if ({psq('cet' if self.settings.is_cet else '')}) {{ $c = Join-Path $env:LOCALAPPDATA 'REDEngine\\ReportQueue' }}
-elseif ($proc) {{ $c = Join-Path $env:LOCALAPPDATA (($proc -replace '-(Win64|WinGDK)-Shipping$', '') + '\\Saved\\Crashes') }}
+{crashes}
 if ($c) {{
   $r.folders = @(Get-ChildItem -Directory $c -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 3 |
     ForEach-Object {{ [ordered]@{{ path = $_.FullName.Replace('\\','/'); time = (T $_); files = @(Get-ChildItem -File $_.FullName | ForEach-Object {{ [string]$_.Name }}) }} }})

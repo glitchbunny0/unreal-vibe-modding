@@ -15,7 +15,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Iterator
 
-from .. import engine, protocol
+from .. import protocol
 from . import Exchange, Status, Transport, TransportError
 
 POLL = 0.01
@@ -69,7 +69,7 @@ class LocalTransport(Transport):
         super().__init__(settings)
         self.root = Path(settings.root)
         if not self.root.is_dir():
-            what = "UVMOD_CET" if settings.is_cet else "UVMOD_UE4SS"
+            what = f"{settings.app.prefix}_{settings.app.root_key}"
             raise TransportError(f"{what} is not a folder on this machine: {self.root} (local transport)")
         self.folder = self.root / self.engine.repl
 
@@ -289,8 +289,8 @@ class LocalTransport(Transport):
             subprocess.Popen(self.settings.launch, shell=True, start_new_session=os.name != "nt",
                              stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             return f"started: {self.settings.launch}"
-        if self.settings.is_cet and os.name == "nt":
-            exe = self.root.joinpath(*engine.CET_EXE_FROM_ROOT).resolve()
+        if self.engine.exe and os.name == "nt":
+            exe = self.root.joinpath(*self.engine.exe).resolve()
             if not exe.is_file():
                 raise TransportError(f"no game exe at {exe}; set UVMOD_LAUNCH to a command that starts the game")
             subprocess.Popen([str(exe)], cwd=str(exe.parent), stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
@@ -345,10 +345,8 @@ class LocalTransport(Transport):
 
     def crash_files(self) -> dict:
         out: dict = {"folders": [], "dumps": []}
-        if self.settings.is_cet:
-            crashes = self._redengine_reports()
-        else:
-            crashes = self._saved_dir("Crashes")
+        scheme, _, sub = self.engine.crash_dir.partition(":")
+        crashes = self._localappdata_dir(sub) if scheme == "localappdata" else self._saved_dir(sub)
         if crashes and crashes.is_dir():
             folders = sorted((p for p in crashes.iterdir() if p.is_dir()), key=lambda p: p.stat().st_mtime, reverse=True)
             out["folders"] = [{"path": str(p), "time": p.stat().st_mtime, "files": sorted(f.name for f in p.iterdir())}
@@ -357,13 +355,13 @@ class LocalTransport(Transport):
         out["dumps"] = [{"path": str(p), "time": p.stat().st_mtime} for p in dumps[:3]]
         return out
 
-    def _redengine_reports(self) -> Path | None:
-        """<LocalAppData>/REDEngine/ReportQueue: one folder per crash (minidump, report.txt, stacktrace.txt)."""
+    def _localappdata_dir(self, sub: str) -> Path | None:
+        """<LocalAppData>/<sub>: on Windows, or in the game's Proton prefix."""
         if os.environ.get("LOCALAPPDATA"):
-            return Path(os.environ["LOCALAPPDATA"]) / "REDEngine" / "ReportQueue"
+            return Path(os.environ["LOCALAPPDATA"]) / sub
         parts = self.root.as_posix().split("/steamapps/")
         if len(parts) > 1:
-            pattern = f"{parts[0]}/steamapps/compatdata/*/pfx/drive_c/users/steamuser/AppData/Local/REDEngine/ReportQueue"
+            pattern = f"{parts[0]}/steamapps/compatdata/*/pfx/drive_c/users/steamuser/AppData/Local/{sub}"
             for d in glob.glob(pattern):
                 return Path(d)
         return None
