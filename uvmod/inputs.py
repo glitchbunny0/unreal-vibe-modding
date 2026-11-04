@@ -52,7 +52,7 @@ class Input:
 
 def press_key(game: Game, combo: str, hold_ms: int = 150) -> str:
     """An OS key press in the game's window, for UE4SS keybinds (see keys.py)."""
-    from . import keys
+    from .core import keys
 
     codes = keys.parse(combo)
     front = game.transport.press_keys(codes, max(50, min(int(hold_ms), 10000)))

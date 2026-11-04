@@ -390,7 +390,7 @@ class LocalTransport(Transport):
     def press_keys(self, codes: list[int], hold_ms: int) -> str:
         if os.name != "nt":
             return super().press_keys(codes, hold_ms)
-        from ...keys import script
+        from ..keys import script
 
         import tempfile as _tempfile
 

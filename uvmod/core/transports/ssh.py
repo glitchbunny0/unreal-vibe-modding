@@ -288,7 +288,7 @@ if ($f) {{ $f.FullName.Replace('\\','/') + '|' + $f.LastWriteTime.Ticks }}
     def press_keys(self, codes: list[int], hold_ms: int) -> str:
         # Keys pressed from the SSH session reach no desktop: the presser runs as a scheduled task in the logged-in
         # session, and writes back which window was in front.
-        from ...keys import script as key_script
+        from ..keys import script as key_script
 
         body = key_script("__PROC__", codes, hold_ms, "__OUT__")
         script = f"""

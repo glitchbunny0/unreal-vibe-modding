@@ -121,7 +121,7 @@ class Readers(unittest.TestCase):
 
 class Keys(unittest.TestCase):
     def test_parse(self):
-        from uvmod import keys
+        from uvmod.core import keys
 
         self.assertEqual(keys.parse("F8"), [0x77])
         self.assertEqual(keys.parse("control+f8"), [0x11, 0x77])
